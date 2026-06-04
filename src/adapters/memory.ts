@@ -1,11 +1,14 @@
 import type {
   AdapterContext,
+  PlaylistMetadata,
   ResolvedYoutubeSource,
   SourceResolver,
   StorageAdapter,
   VideoMetadata,
   YoutubeSource,
 } from "../contracts.js";
+import { normalizeResolvedYoutubeSource } from "../source/normalize.js";
+import { parseYoutubeUrl } from "../source/parse.js";
 
 export class InMemoryStorageAdapter implements StorageAdapter {
   private readonly values = new Map<string, unknown>();
@@ -32,6 +35,7 @@ export function createInMemoryStorage(): StorageAdapter {
 }
 
 export type InMemorySourceResolverOptions = {
+  playlists?: Record<string, Partial<PlaylistMetadata> & { videos: VideoMetadata[] }>;
   videos?: Record<string, Partial<VideoMetadata>>;
 };
 
@@ -44,27 +48,37 @@ export function createInMemorySourceResolver(options: InMemorySourceResolverOpti
         message: "Resolving source with in-memory resolver",
       });
 
-      const videos = source.type === "video" ? [createVideoMetadata(source, 0, options)] : [];
-      const playlistId = source.type === "playlist" ? source.playlistId ?? stableId("playlist", source.url) : stableId("playlist", source.url);
-      const resolvedVideos = videos.length > 0 ? videos : [createVideoMetadata({ type: "video", url: source.url, language: source.language }, 0, options)];
-      const playlist = {
-        id: playlistId,
-        url: source.url,
-        videos: resolvedVideos,
-      };
+      const parsed = parseYoutubeUrl(source.url);
+      const playlistId = source.type === "playlist" ? source.playlistId ?? parsed.playlistId ?? stableId("playlist", source.url) : stableId("playlist", parsed.videoId ?? source.url);
+      const fixturePlaylist = options.playlists?.[playlistId];
+      const rawVideos = fixturePlaylist?.videos ?? [createVideoMetadata({ type: "video", url: source.url, videoId: parsed.videoId, language: source.language }, 0, options)];
+      const normalized = normalizeResolvedYoutubeSource({
+        source,
+        playlist: {
+          id: playlistId,
+          url: source.url,
+          title: fixturePlaylist?.title,
+          description: fixturePlaylist?.description,
+        },
+        videos: rawVideos,
+      });
 
       await context.reportProgress({
         stage: "source_resolution",
         status: "completed",
         message: "Source resolved with in-memory resolver",
-        data: { videoCount: resolvedVideos.length },
+        data: {
+          videoCount: normalized.videos.length,
+          duplicateCount: normalized.duplicateCount,
+          unavailableCount: normalized.unavailableCount,
+        },
       });
 
       return {
-        courseId: `youtube-course:${playlist.id}`,
+        courseId: normalized.courseId,
         source,
-        playlist,
-        videos: resolvedVideos,
+        playlist: normalized.playlist,
+        videos: normalized.videos,
       };
     },
   };
@@ -75,7 +89,7 @@ function createVideoMetadata(
   position: number,
   options: InMemorySourceResolverOptions,
 ): VideoMetadata {
-  const id = source.videoId ?? extractVideoId(source.url) ?? stableId("video", source.url);
+  const id = source.videoId ?? parseYoutubeUrl(source.url).videoId ?? stableId("video", source.url);
   const override = options.videos?.[id] ?? {};
 
   return {
@@ -85,11 +99,6 @@ function createVideoMetadata(
     availability: "available",
     ...override,
   };
-}
-
-function extractVideoId(url: string): string | undefined {
-  const match = url.match(/[?&]v=([^&]+)/) ?? url.match(/youtu\.be\/([^?]+)/) ?? url.match(/shorts\/([^?]+)/);
-  return match?.[1];
 }
 
 function stableId(prefix: string, input: string): string {

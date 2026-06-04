@@ -6,3 +6,4 @@ export * from "./sdk.js";
 export * from "./adapters/memory.js";
 export * from "./source/parse.js";
 export * from "./source/keys.js";
+export * from "./source/normalize.js";
