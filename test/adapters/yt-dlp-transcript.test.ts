@@ -85,6 +85,21 @@ describe("YtDlpTranscriptProvider", () => {
 });
 
 describe("yt-dlp transcript helpers", () => {
+  it("parses full subtitle format lists that contain spaces", () => {
+    const tracks = parseYtDlpSubtitleList(`[info] Available subtitles for video-1:
+Language Name Formats
+en English vtt, ttml, srv3, srv2, srv1, json3`);
+
+    expect(tracks).toEqual([
+      {
+        language: "en",
+        captionKind: "human",
+        formats: ["vtt", "ttml", "srv3", "srv2", "srv1", "json3"],
+      },
+    ]);
+    expect(selectCaptionTrack(tracks, { language: "en" }, [])).toMatchObject({ format: "vtt" });
+  });
+
   it("builds extraction args with skip-download and subtitle-only flags", () => {
     expect(buildExtractSubtitleArgs("https://example.test", { language: "en", captionKind: "human", formats: ["vtt"], format: "vtt" }, "/tmp/out"))
       .toEqual(expect.arrayContaining(["--ignore-config", "--skip-download", "--write-sub", "--sub-lang", "en", "--sub-format", "vtt"]));

@@ -19,6 +19,7 @@ import { parseVtt } from "../transcript/parse-vtt.js";
 
 const execFileAsync = promisify(execFile);
 const PARSER_VERSION = "v1";
+const SUBTITLE_LIST_LINE_PATTERN = new RegExp("^(\\S+)\\s+.+?\\s+((?:[a-z0-9.-]+(?:\\s*[,/]\\s*|$))+$)", "iu");
 
 export type YtDlpCaptionTrack = {
   language: string;
@@ -220,7 +221,7 @@ export function parseYtDlpSubtitleList(stdout: string): YtDlpCaptionTrack[] {
       continue;
     }
 
-    const match = line.match(/^(\S+)\s+.+?\s+([a-z0-9_,/.-]+)$/iu);
+    const match = line.match(SUBTITLE_LIST_LINE_PATTERN);
     if (match?.[1] && match[2]) {
       tracks.push({
         language: match[1],
