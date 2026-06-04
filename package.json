@@ -1,0 +1,23 @@
+{
+  "name": "youtube-learning-sdk",
+  "version": "0.0.0",
+  "private": false,
+  "type": "module",
+  "description": "YouTube-first learning SDK for low-cost transcript extraction, study artifacts, timestamped QA, and embeddable video learning surfaces.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}
