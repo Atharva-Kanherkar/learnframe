@@ -108,7 +108,8 @@ export type ArtifactKind =
   | "glossary"
   | "quiz"
   | "flashcards"
-  | "study_plan";
+  | "study_plan"
+  | "prerequisite_map";
 
 export type Artifact = {
   id: string;
