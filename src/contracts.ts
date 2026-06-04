@@ -260,6 +260,24 @@ export type LearnFrameSdk = {
   ask(input: AskAtTimestampInput): Promise<AskResponse>;
 };
 
+export type PlayerState = {
+  videoId: string;
+  currentTimeSeconds: number;
+  isPlaying: boolean;
+  durationSeconds?: number;
+};
+
+export type SeekTarget = {
+  videoId: string;
+  timestampSeconds: number;
+};
+
+export type PlayerStateAdapter = {
+  getState(): PlayerState;
+  seek(target: SeekTarget): void;
+  subscribe(callback: (state: PlayerState) => void): () => void;
+};
+
 export type LearnFrameErrorCode = "INVALID_SOURCE" | "INVALID_ASK_INPUT" | "RESOLUTION_FAILED";
 
 export class LearnFrameError extends Error {
