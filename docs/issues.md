@@ -4,7 +4,7 @@ This file mirrors the initial GitHub issue plan.
 
 ## Parent
 
-Build YouTube Learning SDK: cheap, fast, accurate video-to-learning pipeline.
+Build LearnFrame: cheap, fast, accurate YouTube-to-learning pipeline.
 
 ## Subissues
 

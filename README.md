@@ -1,8 +1,8 @@
-# YouTube Learning SDK
+# LearnFrame
 
-YouTube Learning SDK is a YouTube-first learning engine for turning public videos
-and playlists into transcripts, summaries, specialized notes, syllabi,
-explanations, quizzes, and timestamp-aware AI help.
+LearnFrame is a YouTube-first learning engine for turning public videos and
+playlists into transcripts, summaries, specialized notes, syllabi, explanations,
+quizzes, and timestamp-aware AI help.
 
 The project optimizes for three things:
 
@@ -14,9 +14,9 @@ The SDK is designed to be consumed by Skillware and by any other app that wants
 to embed YouTube learning workflows.
 
 ```ts
-import { createYoutubeLearningSdk } from "youtube-learning-sdk";
+import { createLearnFrame } from "learnframe";
 
-const sdk = createYoutubeLearningSdk({ llm, storage });
+const sdk = createLearnFrame({ llm, storage });
 
 const course = await sdk.process({
   source: { type: "playlist", url: "https://youtube.com/playlist?list=..." },

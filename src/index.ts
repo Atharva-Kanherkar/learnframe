@@ -1,1 +1,1 @@
-export const SDK_PACKAGE_NAME = "youtube-learning-sdk";
+export const SDK_PACKAGE_NAME = "learnframe";

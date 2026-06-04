@@ -1,4 +1,4 @@
-# YouTube Learning SDK Plan
+# LearnFrame Plan
 
 ## Goal
 
@@ -51,7 +51,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  App["Consuming app: Skillware or other"] --> SDK["YouTube Learning SDK"]
+  App["Consuming app: Skillware or other"] --> SDK["LearnFrame SDK"]
 
   SDK --> Source["Source resolver"]
   SDK --> Transcript["Transcript provider"]
@@ -176,7 +176,7 @@ Ask behavior:
 ## Public SDK Shape
 
 ```ts
-const sdk = createYoutubeLearningSdk({
+const sdk = createLearnFrame({
   llm,
   storage,
   embeddings,
