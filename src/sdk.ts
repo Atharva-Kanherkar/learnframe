@@ -89,6 +89,10 @@ export function createYoutubeLearningSdk(options: LearnFrameSdkOptions): LearnFr
         throw new LearnFrameError("INVALID_ASK_INPUT", "Invalid ask input", askResult.error);
       }
 
+      if (options.qa) {
+        return options.qa.ask(askResult.data);
+      }
+
       return {
         answer: "I do not have enough context to answer yet because retrieval QA has not been configured.",
         status: "insufficient_context",

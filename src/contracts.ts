@@ -189,6 +189,10 @@ export type AskResponse = {
   };
 };
 
+export type RetrievalQaEngine = {
+  ask(input: AskAtTimestampInput): Promise<AskResponse>;
+};
+
 export type SourceResolver = {
   resolve(source: YoutubeSource, context: AdapterContext): Promise<ResolvedYoutubeSource>;
 };
@@ -246,6 +250,7 @@ export type LearnFrameSdkOptions = {
   transcriptProvider?: TranscriptProvider;
   llm?: LlmAdapter;
   embeddings?: EmbeddingsAdapter;
+  qa?: RetrievalQaEngine;
   logger?: Logger;
   onProgress?: (event: ProgressEvent) => void | Promise<void>;
 };
