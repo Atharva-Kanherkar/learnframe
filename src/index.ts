@@ -5,6 +5,7 @@ export * from "./schemas.js";
 export * from "./sdk.js";
 export * from "./adapters/memory.js";
 export * from "./adapters/youtube-data-api.js";
+export * from "./adapters/yt-dlp-transcript.js";
 export * from "./source/parse.js";
 export * from "./source/keys.js";
 export * from "./source/normalize.js";
