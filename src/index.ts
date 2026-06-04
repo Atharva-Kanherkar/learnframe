@@ -8,3 +8,7 @@ export * from "./adapters/youtube-data-api.js";
 export * from "./source/parse.js";
 export * from "./source/keys.js";
 export * from "./source/normalize.js";
+export * from "./transcript/parse-vtt.js";
+export * from "./transcript/parse-srt.js";
+export * from "./transcript/normalize.js";
+export * from "./transcript/keys.js";
