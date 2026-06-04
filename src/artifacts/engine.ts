@@ -18,6 +18,7 @@ export type LowCostArtifactEngineOptions = {
   llm: LlmAdapter;
   storage: StorageAdapter;
   models?: Partial<Record<"cheap" | "medium" | "strong", string>>;
+  maxConcurrentChunkNotes?: number;
 };
 
 export type GenerateArtifactsInput = {
@@ -48,6 +49,7 @@ const DEFAULT_MODELS = {
 
 export function createLowCostArtifactEngine(options: LowCostArtifactEngineOptions): LowCostArtifactEngine {
   const models = { ...DEFAULT_MODELS, ...options.models };
+  const maxConcurrentChunkNotes = Math.max(1, options.maxConcurrentChunkNotes ?? 4);
 
   async function runTask<T>(courseId: string, task: ArtifactTask<T>): Promise<Artifact> {
     const model = models[task.modelRole];
@@ -86,7 +88,9 @@ export function createLowCostArtifactEngine(options: LowCostArtifactEngineOption
       const requested = new Set(input.outputs);
       const artifacts: Artifact[] = [];
       const needsChunkNotes = requested.has("notes") || requested.has("summary") || requested.has("syllabus") || requested.has("glossary") || requested.has("quiz") || requested.has("flashcards") || requested.has("study_plan") || requested.has("prerequisite_map");
-      const noteArtifacts = needsChunkNotes ? await Promise.all(input.chunks.map((chunk) => runTask(input.courseId, createChunkNotesTask(chunk)))) : [];
+      const noteArtifacts = needsChunkNotes
+        ? await mapWithConcurrency(input.chunks, maxConcurrentChunkNotes, (chunk) => runTask(input.courseId, createChunkNotesTask(chunk)))
+        : [];
 
       if (requested.has("notes")) {
         artifacts.push(...noteArtifacts);
@@ -127,6 +131,29 @@ export function createLowCostArtifactEngine(options: LowCostArtifactEngineOption
       return artifacts;
     },
   };
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function runWorker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index];
+      if (item !== undefined) {
+        results[index] = await worker(item, index);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker()));
+  return results;
 }
 
 function createChunkNotesTask(chunk: TranscriptChunk): ArtifactTask<ChunkNotesPayload> {

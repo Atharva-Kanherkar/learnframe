@@ -5,6 +5,9 @@ export const artifactCitationSchema = z.object({
   startSeconds: z.number().nonnegative(),
   endSeconds: z.number().nonnegative(),
   chunkId: z.string().min(1).optional(),
+}).refine((citation) => citation.endSeconds >= citation.startSeconds, {
+  message: "Citation endSeconds must be greater than or equal to startSeconds",
+  path: ["endSeconds"],
 });
 
 export const chunkNotesSchema = z.object({

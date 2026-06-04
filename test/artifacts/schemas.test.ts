@@ -26,6 +26,7 @@ describe("artifact schemas", () => {
 
   it("rejects invalid payloads", () => {
     expect(() => chunkNotesSchema.parse({ chunkId: "chunk-1", videoId: "video-1", summary: "", keyPoints: [], concepts: [], citations: [] })).toThrow();
+    expect(() => chunkNotesSchema.parse({ chunkId: "chunk-1", videoId: "video-1", summary: "Summary", keyPoints: ["Point"], concepts: ["Concept"], citations: [{ videoId: "video-1", startSeconds: 10, endSeconds: 1 }] })).toThrow();
     expect(() => quizSchema.parse({ questions: [{ question: "Q?", choices: ["A"], answer: "A", explanation: "Because", citations: [] }] })).toThrow();
   });
 });
