@@ -73,7 +73,7 @@ describe("createYoutubeLearningSdk", () => {
       onProgress: (event) => progress.push(`${event.stage}:${event.status}`),
     });
 
-    expect(result.courseId).toBe("youtube-course:playlist:https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dabc123");
+    expect(result.courseId).toBe("youtube-course:playlist:abc123");
     expect(result.videos).toHaveLength(1);
     expect(result.playlist.videos).toHaveLength(1);
     expect(result.videos[0]).toMatchObject({

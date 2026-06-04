@@ -29,6 +29,7 @@ export type VideoMetadata = {
   publishedAt?: string;
   position?: number;
   availability: VideoAvailability;
+  etag?: string;
 };
 
 export type PlaylistMetadata = {
@@ -39,11 +40,25 @@ export type PlaylistMetadata = {
   videos: VideoMetadata[];
 };
 
+export type SourceResolutionMetadata = {
+  provider: string;
+  cacheKey?: string;
+  cacheHit?: boolean;
+  cachedAt?: string;
+  expiresAt?: string;
+  pageCount?: number;
+  truncated?: boolean;
+  nextPageToken?: string;
+  duplicateCount?: number;
+  unavailableCount?: number;
+};
+
 export type ResolvedYoutubeSource = {
   courseId: string;
   source: YoutubeSource;
   playlist: PlaylistMetadata;
   videos: VideoMetadata[];
+  sourceResolution?: SourceResolutionMetadata;
 };
 
 export type TranscriptStatus = "available" | "missing" | "blocked" | "needs_transcription";
@@ -138,6 +153,7 @@ export type ProcessResult = {
   videos: VideoMetadata[];
   artifacts: Artifact[];
   status: "ready" | "partial" | "needs_transcription";
+  sourceResolution?: SourceResolutionMetadata;
   createdAt: string;
 };
 
