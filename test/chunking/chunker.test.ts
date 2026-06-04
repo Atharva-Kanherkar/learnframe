@@ -50,6 +50,17 @@ describe("chunkTranscript", () => {
     expect(chunks[0]?.tokenEstimate).toBe(20);
   });
 
+  it("keeps oversized segments intact even when overlap is enabled", () => {
+    const chunks = chunkTranscript(transcript([segment("intro", 0, 1, "intro"), segment("large", 1, 10, "x".repeat(100))]), {
+      maxTokens: 5,
+      overlapSegments: 1,
+      estimateTokens: (text) => (text.startsWith("x") ? 20 : 1),
+    });
+
+    expect(chunks.map((chunk) => chunk.sourceSegmentIds)).toEqual([["intro"], ["large"]]);
+    expect(chunks[1]?.tokenEstimate).toBe(20);
+  });
+
   it("applies configurable segment overlap deterministically", () => {
     const chunks = chunkTranscript(transcript([segment("s1", 0, 1, "one"), segment("s2", 1, 2, "two"), segment("s3", 2, 3, "three")]), {
       maxTokens: 2,

@@ -33,14 +33,15 @@ export function chunkTranscript(transcript: Transcript, options: ChunkTranscript
       currentTokens = sumTokens(current, tokenEstimator);
     }
 
-    current.push(segment);
-    currentTokens += segmentTokens;
-
-    if (segmentTokens > maxTokens && current.length === 1) {
-      chunks.push(createChunk(transcript.videoId, chunks.length, current, tokenEstimator));
+    if (segmentTokens > maxTokens) {
+      chunks.push(createChunk(transcript.videoId, chunks.length, [segment], tokenEstimator));
       current = [];
       currentTokens = 0;
+      continue;
     }
+
+    current.push(segment);
+    currentTokens += segmentTokens;
   }
 
   if (current.length > 0) {
