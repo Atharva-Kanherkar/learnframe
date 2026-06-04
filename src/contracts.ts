@@ -199,6 +199,9 @@ export type TranscriptProvider = {
 export type TranscriptRequest = {
   language?: string;
   allowPaidTranscription?: boolean;
+  fallbackLanguages?: string[];
+  allowAutoCaptions?: boolean;
+  preferHumanCaptions?: boolean;
 };
 
 export type LlmRequest = {
