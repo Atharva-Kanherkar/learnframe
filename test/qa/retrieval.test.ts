@@ -76,6 +76,15 @@ describe("createRetrievalQaEngine", () => {
 
     expect(answer.status).toBe("insufficient_context");
   });
+
+  it("returns insufficient_context when citations are outside retrieved context", async () => {
+    const engine = createRetrievalQaEngine({ chunks: [chunk("a", "video-1", 0, 10)], llm: createUngroundedLlm() });
+
+    const answer = await engine.ask({ courseId: "course-1", videoId: "video-1", question: "bad citation" });
+
+    expect(answer.status).toBe("insufficient_context");
+    expect(answer.confidence.reason).toContain("not covered");
+  });
 });
 
 describe("sdk ask integration", () => {
@@ -119,6 +128,21 @@ function createUncitedLlm(): LlmAdapter {
   return {
     async generateStructured() {
       return { answer: "Uncited", status: "answered", citations: [], replayRanges: [], followUpQuestions: [], confidence: { score: 0.5, reason: "No citations" } };
+    },
+  };
+}
+
+function createUngroundedLlm(): LlmAdapter {
+  return {
+    async generateStructured() {
+      return {
+        answer: "Ungrounded",
+        status: "answered",
+        citations: [{ videoId: "other", startSeconds: 999, endSeconds: 1000, chunkId: "not-retrieved" }],
+        replayRanges: [{ videoId: "other", startSeconds: 999, endSeconds: 1000 }],
+        followUpQuestions: [],
+        confidence: { score: 0.9, reason: "Looks confident" },
+      };
     },
   };
 }

@@ -62,7 +62,11 @@ export function createRetrievalQaEngine(options: RetrievalQaEngineOptions): Retr
       };
 
       try {
-        return answerSchema.parse(await options.llm.generateStructured<AskResponse>(request));
+        const answer = answerSchema.parse(await options.llm.generateStructured<AskResponse>(request));
+        if (!isAnswerGrounded(answer, selectedChunks.map(({ chunk }) => chunk))) {
+          return insufficientContext("Answer citations or replay ranges were not covered by retrieved transcript context.");
+        }
+        return answer;
       } catch (error) {
         return insufficientContext(error instanceof Error ? error.message : "Answer did not satisfy citation schema.");
       }
@@ -155,6 +159,29 @@ function cosineSimilarity(left: number[], right: number[]): number {
     rightNorm += rightValue * rightValue;
   }
   return leftNorm === 0 || rightNorm === 0 ? 0 : dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm));
+}
+
+function isAnswerGrounded(answer: AskResponse, chunks: TranscriptChunk[]): boolean {
+  if (answer.status === "insufficient_context") {
+    return true;
+  }
+
+  return answer.citations.every((citation) => isRangeCovered(citation, chunks))
+    && answer.replayRanges.every((range) => isRangeCovered(range, chunks));
+}
+
+function isRangeCovered(
+  range: { videoId: string; startSeconds: number; endSeconds: number; chunkId?: string },
+  chunks: TranscriptChunk[],
+): boolean {
+  return chunks.some((chunk) => {
+    if (range.chunkId && chunk.id !== range.chunkId) {
+      return false;
+    }
+    return chunk.videoId === range.videoId
+      && range.startSeconds >= chunk.startSeconds
+      && range.endSeconds <= chunk.endSeconds;
+  });
 }
 
 function insufficientContext(reason: string): AskResponse {
