@@ -29,6 +29,7 @@ export type VideoMetadata = {
   publishedAt?: string;
   position?: number;
   availability: VideoAvailability;
+  etag?: string;
 };
 
 export type PlaylistMetadata = {
