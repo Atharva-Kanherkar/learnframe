@@ -13,3 +13,6 @@ export * from "./transcript/parse-vtt.js";
 export * from "./transcript/parse-srt.js";
 export * from "./transcript/normalize.js";
 export * from "./transcript/keys.js";
+export * from "./chunking/chunker.js";
+export * from "./cache/keys.js";
+export * from "./cache/resumable.js";
