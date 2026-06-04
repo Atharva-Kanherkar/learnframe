@@ -1,0 +1,36 @@
+import type { YoutubeSource } from "../contracts.js";
+import type { ParsedYoutubeUrl } from "./parse.js";
+
+export type SourceResolutionCacheKeyInput = {
+  provider: string;
+  source: YoutubeSource;
+  parsed: ParsedYoutubeUrl;
+  options?: Record<string, unknown>;
+};
+
+export function createSourceResolutionCacheKey(input: SourceResolutionCacheKeyInput): string {
+  return [
+    "source-resolution",
+    input.provider,
+    input.source.type,
+    input.parsed.videoId ?? "none",
+    input.parsed.playlistId ?? "none",
+    stableStringify(input.options ?? {}),
+  ].join(":");
+}
+
+export function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entryValue]) => entryValue !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right));
+
+  return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`).join(",")}}`;
+}
