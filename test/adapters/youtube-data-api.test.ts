@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createInMemoryStorage, createYoutubeDataApiSourceResolver } from "../../src/index.js";
+import { createInMemoryStorage, createYoutubeDataApiSourceResolver, createYoutubeLearningSdk } from "../../src/index.js";
 
 describe("createYoutubeDataApiSourceResolver", () => {
   it("resolves a single video using a fake fetch", async () => {
@@ -100,7 +100,7 @@ describe("createYoutubeDataApiSourceResolver", () => {
     const storage = createInMemoryStorage();
     const progress: string[] = [];
     const fetch = createFakeFetch([{ items: [{ id: "abc123", status: { privacyStatus: "public" } }] }]);
-    const resolver = createYoutubeDataApiSourceResolver({ apiKey: "test-key", fetch });
+    const resolver = createYoutubeDataApiSourceResolver({ apiKey: "test-key", fetch, now: () => 1_000 });
     const context = {
       storage,
       reportProgress: async (event: { status: string }) => {
@@ -113,6 +113,90 @@ describe("createYoutubeDataApiSourceResolver", () => {
 
     expect(fetch.urls).toHaveLength(1);
     expect(progress).toContain("skipped");
+  });
+
+  it("refetches source resolution after cache TTL expires", async () => {
+    let now = 1_000;
+    const storage = createInMemoryStorage();
+    const fetch = createFakeFetch([
+      { items: [{ id: "abc123", snippet: { title: "Old" }, status: { privacyStatus: "public" } }] },
+      { items: [{ id: "abc123", snippet: { title: "New" }, status: { privacyStatus: "public" } }] },
+    ]);
+    const resolver = createYoutubeDataApiSourceResolver({ apiKey: "test-key", cacheTtlMs: 100, fetch, now: () => now });
+    const context = { storage, reportProgress: async () => {} };
+
+    const first = await resolver.resolve({ type: "video", url: "https://www.youtube.com/watch?v=abc123" }, context);
+    now = 1_200;
+    const second = await resolver.resolve({ type: "video", url: "https://www.youtube.com/watch?v=abc123" }, context);
+
+    expect(fetch.urls).toHaveLength(2);
+    expect(first.videos[0]?.title).toBe("Old");
+    expect(second.videos[0]?.title).toBe("New");
+  });
+
+  it("bypasses a fresh cache entry when forceRefresh is enabled", async () => {
+    const storage = createInMemoryStorage();
+    const fetch = createFakeFetch([
+      { items: [{ id: "abc123", snippet: { title: "Old" }, status: { privacyStatus: "public" } }] },
+      { items: [{ id: "abc123", snippet: { title: "Forced" }, status: { privacyStatus: "public" } }] },
+    ]);
+    const source = { type: "video" as const, url: "https://www.youtube.com/watch?v=abc123" };
+
+    await createYoutubeDataApiSourceResolver({ apiKey: "test-key", fetch, now: () => 1_000 }).resolve(source, {
+      storage,
+      reportProgress: async () => {},
+    });
+    const refreshed = await createYoutubeDataApiSourceResolver({ apiKey: "test-key", fetch, forceRefresh: true, now: () => 1_010 }).resolve(source, {
+      storage,
+      reportProgress: async () => {},
+    });
+
+    expect(fetch.urls).toHaveLength(2);
+    expect(refreshed.videos[0]?.title).toBe("Forced");
+  });
+
+  it("throws when maxPages truncates a playlist unless partial resolution is allowed", async () => {
+    const progress: unknown[] = [];
+    const fetch = createFakeFetch([
+      {
+        nextPageToken: "page-2",
+        items: [{ snippet: { title: "A", position: 0, resourceId: { videoId: "a" } } }],
+      },
+    ]);
+    const resolver = createYoutubeDataApiSourceResolver({ apiKey: "test-key", fetch, maxPages: 1 });
+
+    await expect(
+      resolver.resolve(
+        { type: "playlist", url: "https://www.youtube.com/playlist?list=PL123" },
+        {
+          storage: createInMemoryStorage(),
+          reportProgress: async (event) => progress.push(event.data),
+        },
+      ),
+    ).rejects.toMatchObject({ code: "RESOLUTION_FAILED" });
+    expect(progress).toContainEqual({ maxPages: 1, nextPageToken: "page-2", pageCount: 1, partialItemCount: 1 });
+  });
+
+  it("marks sdk.process partial when partial playlist resolution is explicitly allowed", async () => {
+    const fetch = createFakeFetch([
+      {
+        nextPageToken: "page-2",
+        items: [{ snippet: { title: "A", position: 0, resourceId: { videoId: "a" } } }],
+      },
+      {
+        items: [{ id: "a", snippet: { title: "A" }, contentDetails: { duration: "PT10M" }, status: { privacyStatus: "public" } }],
+      },
+    ]);
+    const sdk = createYoutubeLearningSdk({
+      storage: createInMemoryStorage(),
+      sourceResolver: createYoutubeDataApiSourceResolver({ apiKey: "test-key", allowPartial: true, fetch, maxPages: 1 }),
+    });
+
+    const result = await sdk.process({ source: { type: "playlist", url: "https://www.youtube.com/playlist?list=PL123" } });
+
+    expect(result.status).toBe("partial");
+    expect(result.sourceResolution).toMatchObject({ nextPageToken: "page-2", pageCount: 1, truncated: true });
+    expect(result.videos.map((video) => video.id)).toEqual(["a"]);
   });
 });
 

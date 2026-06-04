@@ -70,7 +70,8 @@ export function createYoutubeLearningSdk(options: LearnFrameSdkOptions): LearnFr
           playlist: resolved.playlist,
           videos: resolved.videos,
           artifacts: [],
-          status: "ready",
+          status: resolved.sourceResolution?.truncated ? "partial" : "ready",
+          sourceResolution: resolved.sourceResolution,
           createdAt: new Date().toISOString(),
         } satisfies ProcessResult;
       } catch (error) {

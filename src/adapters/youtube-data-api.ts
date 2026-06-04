@@ -16,6 +16,29 @@ export type YoutubeDataApiSourceResolverOptions = {
   fetch?: typeof globalThis.fetch;
   maxPages?: number;
   providerName?: string;
+  cacheTtlMs?: number;
+  forceRefresh?: boolean;
+  allowPartial?: boolean;
+  now?: () => number;
+};
+
+type SourceResolutionCacheEntry = {
+  result: ResolvedYoutubeSource;
+  cachedAt: string;
+  expiresAt: string;
+};
+
+type YoutubeDataApiResolution = {
+  source: YoutubeSource;
+  playlist: {
+    id: string;
+    url: string;
+    title?: string;
+  };
+  videos: VideoMetadata[];
+  pageCount: number;
+  truncated: boolean;
+  nextPageToken?: string;
 };
 
 type YoutubeListResponse<T> = {
@@ -57,6 +80,8 @@ export function createYoutubeDataApiSourceResolver(options: YoutubeDataApiSource
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const provider = options.providerName ?? "youtube-data-api";
   const maxPages = options.maxPages ?? 100;
+  const cacheTtlMs = options.cacheTtlMs ?? 5 * 60 * 1000;
+  const now = options.now ?? Date.now;
 
   return {
     async resolve(source: YoutubeSource, context: AdapterContext): Promise<ResolvedYoutubeSource> {
@@ -65,37 +90,72 @@ export function createYoutubeDataApiSourceResolver(options: YoutubeDataApiSource
       }
 
       const parsed = parseYoutubeUrl(source.url);
-      const cacheKey = createSourceResolutionCacheKey({ provider, source, parsed, options: { maxPages } });
-      const cached = await context.storage.get<ResolvedYoutubeSource>(cacheKey);
-      if (cached) {
+      const cacheKey = createSourceResolutionCacheKey({
+        provider,
+        source,
+        parsed,
+        options: { allowPartial: options.allowPartial ?? false, maxPages },
+      });
+      const cached = await context.storage.get<SourceResolutionCacheEntry>(cacheKey);
+      const nowMs = now();
+      const cacheEnabled = cacheTtlMs > 0;
+      if (cacheEnabled && !options.forceRefresh && cached && Date.parse(cached.expiresAt) > nowMs) {
+        const cachedResult = {
+          ...cached.result,
+          sourceResolution: {
+            ...cached.result.sourceResolution,
+            provider: cached.result.sourceResolution?.provider ?? provider,
+            cacheHit: true,
+            cachedAt: cached.cachedAt,
+            expiresAt: cached.expiresAt,
+          },
+        } satisfies ResolvedYoutubeSource;
         await context.reportProgress({
           stage: "source_resolution",
           status: "skipped",
           message: "Using cached YouTube source resolution",
-          data: { cacheKey, videoCount: cached.videos.length },
+          data: { cacheKey, cachedAt: cached.cachedAt, expiresAt: cached.expiresAt, videoCount: cachedResult.videos.length },
         });
-        return cached;
+        return cachedResult;
       }
 
       const result = source.type === "playlist"
-        ? await resolvePlaylist(source, parsed.playlistId, fetchImpl, options.apiKey, maxPages, context)
+        ? await resolvePlaylist(source, parsed.playlistId, fetchImpl, options.apiKey, maxPages, options.allowPartial ?? false, context)
         : await resolveVideo(source, parsed.videoId, fetchImpl, options.apiKey);
 
       const normalized = normalizeResolvedYoutubeSource(result);
+      const sourceResolution = {
+        provider,
+        cacheKey,
+        cacheHit: false,
+        pageCount: result.pageCount,
+        truncated: result.truncated,
+        nextPageToken: result.nextPageToken,
+        duplicateCount: normalized.duplicateCount,
+        unavailableCount: normalized.unavailableCount,
+      } satisfies NonNullable<ResolvedYoutubeSource["sourceResolution"]>;
       const resolved: ResolvedYoutubeSource = {
         courseId: normalized.courseId,
         source: normalized.source,
         playlist: normalized.playlist,
         videos: normalized.videos,
+        sourceResolution,
       };
 
-      await context.storage.set(cacheKey, resolved);
+      if (cacheEnabled) {
+        const cachedAt = new Date(nowMs).toISOString();
+        const expiresAt = new Date(nowMs + cacheTtlMs).toISOString();
+        await context.storage.set<SourceResolutionCacheEntry>(cacheKey, { result: resolved, cachedAt, expiresAt });
+        resolved.sourceResolution = { ...sourceResolution, cachedAt, expiresAt };
+      }
       await context.reportProgress({
         stage: "source_resolution",
         status: "completed",
         message: "YouTube Data API source resolved",
         data: {
           cacheKey,
+          truncated: resolved.sourceResolution?.truncated,
+          nextPageToken: resolved.sourceResolution?.nextPageToken,
           videoCount: normalized.videos.length,
           duplicateCount: normalized.duplicateCount,
           unavailableCount: normalized.unavailableCount,
@@ -112,7 +172,7 @@ async function resolveVideo(
   videoId: string | undefined,
   fetchImpl: typeof globalThis.fetch,
   apiKey: string,
-) {
+): Promise<YoutubeDataApiResolution> {
   if (!videoId) {
     throw new LearnFrameError("INVALID_SOURCE", "Video source must include a video id");
   }
@@ -133,6 +193,8 @@ async function resolveVideo(
       title: metadata.title,
     },
     videos: [metadata],
+    pageCount: 1,
+    truncated: false,
   };
 }
 
@@ -142,8 +204,9 @@ async function resolvePlaylist(
   fetchImpl: typeof globalThis.fetch,
   apiKey: string,
   maxPages: number,
+  allowPartial: boolean,
   context: AdapterContext,
-) {
+): Promise<YoutubeDataApiResolution> {
   if (!playlistId) {
     throw new LearnFrameError("INVALID_SOURCE", "Playlist source must include a playlist id");
   }
@@ -173,6 +236,20 @@ async function resolvePlaylist(
     });
   } while (pageToken && page < maxPages);
 
+  const truncated = Boolean(pageToken);
+  if (truncated && !allowPartial) {
+    await context.reportProgress({
+      stage: "source_resolution",
+      status: "failed",
+      message: "YouTube playlist resolution stopped before all pages were fetched",
+      data: { maxPages, nextPageToken: pageToken, pageCount: page, partialItemCount: playlistItems.length },
+    });
+    throw new LearnFrameError(
+      "RESOLUTION_FAILED",
+      "YouTube playlist resolution was truncated by maxPages. Increase maxPages or set allowPartial to true.",
+    );
+  }
+
   const ids = playlistItems.map((item) => item.snippet?.resourceId?.videoId).filter((id): id is string => Boolean(id));
   const detailMap = await fetchVideoDetails(ids, fetchImpl, apiKey);
   const videos = playlistItems.flatMap((item, index) => {
@@ -191,6 +268,9 @@ async function resolvePlaylist(
       url: source.url,
     },
     videos,
+    pageCount: page,
+    truncated,
+    nextPageToken: pageToken,
   };
 }
 
