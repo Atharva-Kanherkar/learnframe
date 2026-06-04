@@ -47,4 +47,4 @@ Planning repo. See [docs/plan.md](docs/plan.md) for the implementation plan.
 
 ## License
 
-TBD.
+MIT.
