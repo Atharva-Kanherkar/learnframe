@@ -144,7 +144,17 @@ export type ProgressEvent = {
 export type ProcessInput = {
   source: YoutubeSource;
   outputs?: ArtifactKind[];
+  transcript?: TranscriptRequest;
+  incremental?: {
+    enabled?: boolean;
+  };
   onProgress?: (event: ProgressEvent) => void | Promise<void>;
+};
+
+export type ProcessSyncSummary = {
+  added: string[];
+  updated: string[];
+  skipped: string[];
 };
 
 export type ProcessResult = {
@@ -152,10 +162,58 @@ export type ProcessResult = {
   source: YoutubeSource;
   playlist: PlaylistMetadata;
   videos: VideoMetadata[];
+  transcripts: Transcript[];
+  chunks: TranscriptChunk[];
   artifacts: Artifact[];
   status: "ready" | "partial" | "needs_transcription";
+  sync: ProcessSyncSummary;
   sourceResolution?: SourceResolutionMetadata;
   createdAt: string;
+};
+
+export type ProcessedVideoState = {
+  video: VideoMetadata;
+  fingerprint: string;
+  transcript: Transcript;
+  chunks: TranscriptChunk[];
+  artifacts: Artifact[];
+};
+
+export type CourseProcessingState = {
+  courseId: string;
+  source: YoutubeSource;
+  playlist: PlaylistMetadata;
+  videos: VideoMetadata[];
+  transcripts: Transcript[];
+  chunks: TranscriptChunk[];
+  artifacts: Artifact[];
+  processedVideos: Record<string, ProcessedVideoState>;
+  sourceResolution?: SourceResolutionMetadata;
+  chunkEmbeddings?: Record<string, number[]>;
+  sync: ProcessSyncSummary;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ExportPackInput = {
+  courseId: string;
+};
+
+export type ExportPackManifest = {
+  courseId: string;
+  generatedAt: string;
+  videoCount: number;
+  transcriptCount: number;
+  chunkCount: number;
+  artifactCount: number;
+};
+
+export type ExportPackResult = {
+  courseId: string;
+  generatedAt: string;
+  json: string;
+  markdown: string;
+  manifest: ExportPackManifest;
 };
 
 export type TimestampRange = {
@@ -248,16 +306,25 @@ export type LearnFrameSdkOptions = {
   sourceResolver: SourceResolver;
   storage: StorageAdapter;
   transcriptProvider?: TranscriptProvider;
+  artifactEngine?: {
+    generate(input: {
+      courseId: string;
+      chunks: TranscriptChunk[];
+      outputs: ArtifactKind[];
+    }): Promise<Artifact[]>;
+  };
   llm?: LlmAdapter;
   embeddings?: EmbeddingsAdapter;
   qa?: RetrievalQaEngine;
   logger?: Logger;
+  courseStateKeyPrefix?: string;
   onProgress?: (event: ProgressEvent) => void | Promise<void>;
 };
 
 export type LearnFrameSdk = {
   process(input: ProcessInput): Promise<ProcessResult>;
   ask(input: AskAtTimestampInput): Promise<AskResponse>;
+  exportPack(input: ExportPackInput): Promise<ExportPackResult>;
 };
 
 export type PlayerState = {
@@ -278,7 +345,17 @@ export type PlayerStateAdapter = {
   subscribe(callback: (state: PlayerState) => void): () => void;
 };
 
-export type LearnFrameErrorCode = "INVALID_SOURCE" | "INVALID_ASK_INPUT" | "RESOLUTION_FAILED";
+export type LearnFrameErrorCode =
+  | "INVALID_SOURCE"
+  | "INVALID_ASK_INPUT"
+  | "INVALID_EXPORT_INPUT"
+  | "RESOLUTION_FAILED"
+  | "TRANSCRIPT_PROVIDER_MISSING"
+  | "TRANSCRIPT_FAILED"
+  | "ARTIFACT_ENGINE_MISSING"
+  | "ARTIFACT_GENERATION_FAILED"
+  | "COURSE_NOT_FOUND"
+  | "EXPORT_FAILED";
 
 export class LearnFrameError extends Error {
   readonly code: LearnFrameErrorCode;
