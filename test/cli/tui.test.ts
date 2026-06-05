@@ -32,6 +32,11 @@ function fakeCtx(overrides: Partial<TuiContext> = {}): TuiContext {
       artifactKinds: ["notes", "summary", "syllabus"],
       modelRole: "cheap",
     }),
+    exportFactory: async (courseId, outputDir) => ({
+      courseId,
+      jsonPath: `${outputDir ?? "/tmp/exports"}/${courseId}.json`,
+      markdownPath: `${outputDir ?? "/tmp/exports"}/${courseId}.md`,
+    }),
     ...overrides,
   };
 }
@@ -56,6 +61,7 @@ describe("TUI help and navigation", () => {
     expect(output).toContain("course <id>                        Load a saved course");
     expect(output).toContain("courses                            List saved courses");
     expect(output).toContain("exit                               Quit");
+    expect(output).toContain("export [courseId] [--dir path]     Export saved course as JSON + Markdown");
   });
 
   it("returns empty lines for blank input", async () => {
@@ -245,6 +251,37 @@ describe("TUI ask", () => {
     expect(output).toContain("Replay:");
     expect(output).toContain("Follow-ups:");
     expect(output).toContain("  - What else?");
+  });
+});
+
+describe("TUI export", () => {
+  it("exports current loaded course", async () => {
+    const session = makeTuiSession(fakeCtx(), { currentCourse: "abc123", currentUrl: "https://..." });
+    const output = await lines(session, "export");
+
+    expect(output).toEqual([
+      "Exported abc123",
+      "JSON: /tmp/exports/abc123.json",
+      "Markdown: /tmp/exports/abc123.md",
+    ]);
+  });
+
+  it("exports explicit course id to a custom directory", async () => {
+    const output = await lines(makeTuiSession(fakeCtx()), "export my-course --dir /tmp/out");
+    expect(output).toEqual([
+      "Exported my-course",
+      "JSON: /tmp/out/my-course.json",
+      "Markdown: /tmp/out/my-course.md",
+    ]);
+  });
+
+  it("shows usage when no course id is available", async () => {
+    expect(await lines(makeTuiSession(fakeCtx()), "export")).toEqual(["Usage: export [courseId] [--dir path]"]);
+  });
+
+  it("surfaces export errors", async () => {
+    const session = makeTuiSession(fakeCtx({ exportFactory: async () => { throw new Error("disk full"); } }), { currentCourse: "abc123", currentUrl: "https://..." });
+    expect(await lines(session, "export")).toEqual(["Error: disk full"]);
   });
 });
 

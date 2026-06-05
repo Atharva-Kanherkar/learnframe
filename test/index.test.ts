@@ -57,6 +57,7 @@ describe("createYoutubeLearningSdk", () => {
     expect(sdk).toEqual({
       process: expect.any(Function),
       ask: expect.any(Function),
+      exportPack: expect.any(Function),
     });
     expect(createLearnFrame).toBe(createYoutubeLearningSdk);
   });

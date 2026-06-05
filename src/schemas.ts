@@ -27,5 +27,10 @@ export const askAtTimestampInputSchema = z.object({
   question: z.string().min(1),
 });
 
+export const exportPackInputSchema = z.object({
+  courseId: z.string().min(1),
+});
+
 export type ParsedYoutubeSource = z.infer<typeof sourceSchema>;
 export type ParsedAskAtTimestampInput = z.infer<typeof askAtTimestampInputSchema>;
+export type ParsedExportPackInput = z.infer<typeof exportPackInputSchema>;
