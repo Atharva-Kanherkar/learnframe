@@ -16,9 +16,16 @@ const SCHEMAS: Record<string, any> = {
   "retrieval-qa-answer": { type:"object", additionalProperties:false, required:["answer","status","citations","replayRanges","followUpQuestions","confidence"], properties:{ answer:{type:"string"}, status:{type:"string",enum:["answered","insufficient_context"]}, citations:{type:"array",items:QA_CIT}, replayRanges:{type:"array",items:RNG}, followUpQuestions:{type:"array",items:{type:"string"}}, confidence:{ type:"object",additionalProperties:false,required:["score","reason"], properties:{ score:{type:"number"}, reason:{type:"string"} } } } },
 };
 
-export function createOpenAiLlmAdapter(apiKey: string, model = "gpt-4o-mini"): LlmAdapter {
+const MODEL_MAP: Record<string, string> = {
+  cheap: "gpt-4o-mini",
+  medium: "gpt-4o",
+  strong: "gpt-4o",
+};
+
+export function createOpenAiLlmAdapter(apiKey: string, defaultModel = "gpt-4o-mini"): LlmAdapter {
   return {
     async generateStructured<T>(request: LlmRequest): Promise<T> {
+      const model = MODEL_MAP[request.modelRole ?? ""] ?? defaultModel;
       const schema = SCHEMAS[request.task];
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
