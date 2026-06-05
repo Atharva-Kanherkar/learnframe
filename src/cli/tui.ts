@@ -234,11 +234,14 @@ export function defaultTuiContext(): TuiContext {
       const storage = createInMemoryStorage();
       const vid = parseYoutubeUrl(url).videoId ?? url;
       const t = new YtDlpTranscriptProvider({ storage, timeoutMs: 120_000 });
+      console.error(`  Extracting captions for ${vid}...`);
       const r = await t.getTranscript({ id: vid, url, availability: "available" as any }, { language: "en" });
       if (r.status === "missing" && useWhisper && apiKey) {
+        console.error("  No captions found. Transcribing with OpenAI Whisper (may take 1-2 min)...");
         const w = new WhisperTranscriptProvider({ apiKey, storage, timeoutMs: 300_000 });
         return w.getTranscript({ id: vid, url, availability: "available" as any }, { allowPaidTranscription: true });
       }
+      console.error(`  Got ${r.segments.length} segments (${r.status}, ${r.provenance?.captionKind ?? "none"}).`);
       return r;
     },
 
@@ -254,9 +257,11 @@ export function defaultTuiContext(): TuiContext {
       }
       const chunks = chunkTranscript(transcript);
       const kinds = outputs.split(",").map((s) => s.trim()) as any[];
+      console.error(`  Chunked into ${chunks.length} chunks. Generating ${kinds.join(", ")}...`);
       const llm = await this.llmFactory(apiKey);
       const engine = createLowCostArtifactEngine({ llm, storage, maxConcurrentChunkNotes: 3 });
       const artifacts = await engine.generate({ courseId: parseYoutubeUrl(url).videoId ?? url, chunks, outputs: kinds });
+      console.error(`  Generated ${artifacts.length} artifacts.`);
       const courseId = parseYoutubeUrl(url).videoId ?? url;
       this.saveCourse(courseId, { courseId, url, createdAt: new Date().toISOString(), chunkCount: chunks.length, chunks, artifacts });
       return { courseId, url, artifactCount: artifacts.length, artifactKinds: artifacts.map((a: any) => a.kind), modelRole: "cheap" };
