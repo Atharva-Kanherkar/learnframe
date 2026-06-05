@@ -179,8 +179,8 @@ function isRangeCovered(
       return false;
     }
     return chunk.videoId === range.videoId
-      && range.startSeconds >= chunk.startSeconds
-      && range.endSeconds <= chunk.endSeconds;
+      && range.startSeconds < chunk.endSeconds
+      && range.endSeconds > chunk.startSeconds;
   });
 }
 
