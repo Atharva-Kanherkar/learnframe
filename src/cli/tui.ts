@@ -8,7 +8,7 @@ import { buildExportPackResult } from "../export/pack.js";
 import type { CourseProcessingState, Transcript, StorageAdapter, ArtifactKind } from "../contracts.js";
 
 // ---------------------------------------------------------------------------
-// ANSI palette
+// ANSI palette (expanded)
 // ---------------------------------------------------------------------------
 export const C = {
   reset: "\x1b[0m",
@@ -99,6 +99,114 @@ export function createSpinner(text: string) {
 }
 
 // ---------------------------------------------------------------------------
+// HTML Artifact Generator
+// ---------------------------------------------------------------------------
+export function generateHtmlArtifact(type: string, title: string, content: any): string {
+  const styles = `
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 40px 20px; background: #0f172a; color: #e2e8f0; }
+      h1 { color: #38bdf8; border-bottom: 2px solid #38bdf8; padding-bottom: 10px; }
+      h2 { color: #818cf8; margin-top: 30px; }
+      .card { background: #1e293b; border-radius: 12px; padding: 20px; margin: 15px 0; border-left: 4px solid #38bdf8; }
+      .flashcard { background: linear-gradient(135deg, #1e293b 0%, #334155 100%); border-radius: 16px; padding: 30px; margin: 20px 0; border: 2px solid #475569; }
+      .flashcard-front { font-size: 1.3em; font-weight: 600; color: #fbbf24; margin-bottom: 15px; }
+      .flashcard-back { color: #cbd5e1; line-height: 1.6; }
+      .tag { display: inline-block; background: #38bdf8; color: #0f172a; padding: 4px 12px; border-radius: 20px; font-size: 0.85em; margin: 5px 5px 5px 0; font-weight: 600; }
+      .timestamp { color: #94a3b8; font-size: 0.9em; }
+      .highlight { background: rgba(56, 189, 248, 0.1); padding: 2px 6px; border-radius: 4px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin: 20px 0; }
+      .metric { text-align: center; padding: 20px; background: #1e293b; border-radius: 12px; }
+      .metric-value { font-size: 2em; font-weight: 700; color: #38bdf8; }
+      .metric-label { color: #94a3b8; margin-top: 5px; }
+    </style>
+  `;
+
+  let bodyContent = "";
+
+  switch (type) {
+    case "flashcards": {
+      const cards = content.cards || [];
+      bodyContent = `
+        <h1>🎯 ${title}</h1>
+        <div class="grid">
+          <div class="metric">
+            <div class="metric-value">${cards.length}</div>
+            <div class="metric-label">Flashcards</div>
+          </div>
+        </div>
+        ${cards.map((card: any, i: number) => `
+          <div class="flashcard">
+            <div class="flashcard-front">Q${i + 1}: ${card.front || card.question || "Question"}</div>
+            <div class="flashcard-back">${card.back || card.answer || "Answer"}</div>
+            ${card.tags ? `<div>${card.tags.map((t: string) => `<span class="tag">${t}</span>`).join("")}</div>` : ""}
+          </div>
+        `).join("")}
+      `;
+      break;
+    }
+    case "notes": {
+      const sections = content.sections || [];
+      bodyContent = `
+        <h1>📝 ${title}</h1>
+        ${sections.map((section: any) => `
+          <div class="card">
+            <h2>${section.heading || "Section"}</h2>
+            <p>${section.content || ""}</p>
+            ${section.keyPoints ? `<ul>${section.keyPoints.map((p: string) => `<li>${p}</li>`).join("")}</ul>` : ""}
+            ${section.timestamps ? `<div class="timestamp">⏱️ ${section.timestamps.join(", ")}</div>` : ""}
+          </div>
+        `).join("")}
+      `;
+      break;
+    }
+    case "infographic": {
+      const stats = content.stats || {};
+      const items = content.items || [];
+      bodyContent = `
+        <h1>📊 ${title}</h1>
+        <div class="grid">
+          ${Object.entries(stats).map(([key, value]) => `
+            <div class="metric">
+              <div class="metric-value">${value}</div>
+              <div class="metric-label">${key}</div>
+            </div>
+          `).join("")}
+        </div>
+        ${items.map((item: any) => `
+          <div class="card">
+            <h2>${item.title || "Item"}</h2>
+            <p>${item.description || ""}</p>
+            ${item.tags ? `<div>${item.tags.map((t: string) => `<span class="tag">${t}</span>`).join("")}</div>` : ""}
+          </div>
+        `).join("")}
+      `;
+      break;
+    }
+    default: {
+      bodyContent = `
+        <h1>📄 ${title}</h1>
+        <div class="card">
+          <pre>${JSON.stringify(content, null, 2)}</pre>
+        </div>
+      `;
+    }
+  }
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  ${styles}
+</head>
+<body>
+  ${bodyContent}
+</body>
+</html>`;
+}
+
+// ---------------------------------------------------------------------------
 // TUI context and session types
 // ---------------------------------------------------------------------------
 export type TuiContext = {
@@ -106,7 +214,7 @@ export type TuiContext = {
   llmFactory: (apiKey: string) => any;
   transcriptFactory: (url: string, apiKey: string | undefined, useWhisper: boolean) => Promise<any>;
   processFactory: (url: string, apiKey: string, outputs: string, useWhisper?: boolean) => Promise<any>;
-  exportFactory: (courseId: string, outputDir?: string) => Promise<{ courseId: string; jsonPath: string; markdownPath: string }>;
+  exportFactory: (courseId: string, outputDir?: string) => Promise<{ courseId: string; jsonPath: string; markdownPath: string; htmlPath?: string }>;
   resolveUrl: (url: string) => Promise<any>;
   listSavedCourses: () => string[];
   loadSavedCourse: (id: string) => any | undefined;
@@ -119,6 +227,8 @@ export type TuiContext = {
 export type TuiState = {
   currentCourse: string | undefined;
   currentUrl: string | undefined;
+  mode: "command" | "chat";
+  chatHistory: Array<{ role: "user" | "assistant"; text: string }>;
 };
 
 export type TuiOutput = { lines: string[]; state: TuiState };
@@ -127,8 +237,14 @@ export type TuiSession = {
   getState(): TuiState;
 };
 
-export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCourse: undefined, currentUrl: undefined }): TuiSession {
-  const state = { ...initial };
+export function makeTuiSession(ctx: TuiContext, initial: Partial<TuiState> = {}): TuiSession {
+  const state: TuiState = {
+    currentCourse: undefined,
+    currentUrl: undefined,
+    mode: initial.mode ?? (initial.currentCourse ? "chat" : "command"),
+    chatHistory: initial.chatHistory ?? [],
+    ...initial,
+  };
   const llm: { instance: any | undefined } = { instance: undefined };
 
   const fmt = (s: number) => {
@@ -140,43 +256,61 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
     return chatBubble("LearnFrame", C.brightCyan, lines);
   }
 
+  function userBubble(text: string): string[] {
+    return chatBubble("You", C.brightGreen, [text]);
+  }
+
   async function handle(input: string): Promise<TuiOutput> {
     const lines: string[] = [];
     const trimmed = input.trim();
     if (!trimmed) return { lines: [], state };
 
+    // Always show user input as a bubble in chat mode
+    if (state.mode === "chat" && !trimmed.startsWith("/") && !trimmed.startsWith("!")) {
+      lines.push(...userBubble(trimmed));
+    }
+
     const parts = trimmed.split(/\s+/);
     const cmd = parts[0].toLowerCase();
     const rest = parts.slice(1);
 
+    // Exit always works
     if (cmd === "exit" || cmd === "quit") { lines.push("exit"); return { lines, state }; }
-    if (cmd === "help") {
-      lines.push(title("LearnFrame TUI Commands"));
+
+    // Help
+    if (cmd === "help" || cmd === "?") {
+      lines.push(title("LearnFrame — Claude Code for YouTube"));
       lines.push(hr());
+      lines.push(paint(C.bold, "CHAT MODE (when course is loaded):"));
+      lines.push(bullet("Just type your question — no need for 'ask'"));
+      lines.push(bullet("/notes — Generate visual study notes"));
+      lines.push(bullet("/flashcards — Generate flashcards"));
+      lines.push(bullet("/infographic — Generate data infographic"));
+      lines.push(bullet("/export — Export course as JSON + Markdown + HTML"));
+      lines.push(bullet("/status — Show course processing status"));
+      lines.push(bullet("/artifacts — List all generated artifacts"));
+      lines.push(bullet("/quit — Exit chat mode"));
+      lines.push("");
+      lines.push(paint(C.bold, "COMMAND MODE (when no course loaded):"));
       lines.push(bullet("process <url> [--outputs kind,...] [--whisper]"));
-      lines.push(bullet("ask <question>                     Ask about loaded course"));
-      lines.push(bullet("resolve <url>                      Resolve YouTube URL"));
-      lines.push(bullet("course <id>                        Load a saved course"));
-      lines.push(bullet("courses                            List saved courses"));
-      lines.push(bullet("status                             Show current course status"));
-      lines.push(bullet("artifacts                          List artifacts for current course"));
-      lines.push(bullet("transcript <url> [--whisper]       Extract or show transcript"));
-      lines.push(bullet("export [courseId] [--dir path]     Export course as JSON + Markdown"));
-      lines.push(bullet("delete <id>                        Delete a saved course"));
-      lines.push(bullet("config                             Show configuration"));
-      lines.push(bullet("url                                Show current course URL"));
-      lines.push(bullet("help                               Show this help"));
-      lines.push(bullet("exit                               Quit"));
+      lines.push(bullet("resolve <url> — Resolve YouTube URL"));
+      lines.push(bullet("course <id> — Load a saved course"));
+      lines.push(bullet("courses — List saved courses"));
+      lines.push(bullet("delete <id> — Delete a saved course"));
+      lines.push(bullet("config — Show configuration"));
+      lines.push(bullet("help — Show this help"));
       lines.push(hr());
       return { lines, state };
     }
 
+    // Config command
     if (cmd === "config") {
       const apiKey = ctx.getApiKey();
       lines.push(...respond([title("Config"), badge("OPENAI_API_KEY:", apiKey ? "set" : "not set")]));
       return { lines, state };
     }
 
+    // Delete command
     if (cmd === "delete") {
       const id = rest[0];
       if (!id) { lines.push(warn("Usage: delete <id>")); return { lines, state }; }
@@ -185,12 +319,14 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
       if (state.currentCourse === id) {
         state.currentCourse = undefined;
         state.currentUrl = undefined;
-        lines.push(info("Current course cleared"));
+        state.mode = "command";
+        lines.push(info("Switched to command mode"));
       }
       return { lines, state };
     }
 
-    if (cmd === "status") {
+    // Status (works in both modes)
+    if (cmd === "/status" || cmd === "status") {
       if (!state.currentCourse) { lines.push(warn("No course loaded")); return { lines, state }; }
       const s = ctx.loadSavedCourse(state.currentCourse);
       if (!s) { lines.push(fail(`Course "${state.currentCourse}" not found`)); return { lines, state }; }
@@ -199,7 +335,7 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
       const artifactCount = Array.isArray(s.artifacts) ? s.artifacts.length : 0;
       const sync = s.sync ?? { added: [], updated: [], skipped: [] };
       lines.push(...respond([
-        title(`Course: ${state.currentCourse}`),
+        title(`📚 ${state.currentCourse}`),
         badge("URL:", s.url ?? "—"),
         badge("Videos:", String(videoCount)),
         badge("Chunks:", String(chunkCount)),
@@ -210,7 +346,8 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
       return { lines, state };
     }
 
-    if (cmd === "artifacts") {
+    // Artifacts list
+    if (cmd === "/artifacts" || cmd === "artifacts") {
       if (!state.currentCourse) { lines.push(warn("No course loaded")); return { lines, state }; }
       const s = ctx.loadSavedCourse(state.currentCourse);
       if (!s) { lines.push(fail(`Course "${state.currentCourse}" not found`)); return { lines, state }; }
@@ -219,14 +356,15 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
         lines.push(...respond([info("No artifacts generated yet")]));
       } else {
         lines.push(...respond([
-          title(`Artifacts (${artifacts.length})`),
+          title(`🎨 Artifacts (${artifacts.length})`),
           ...artifacts.map((a: any) => bullet(`${a.kind} — ${a.videoId ?? "course"} (${a.modelRole ?? "unknown"})`)),
         ]));
       }
       return { lines, state };
     }
 
-    if (cmd === "export") {
+    // Export
+    if (cmd === "/export" || cmd === "export") {
       let courseId = state.currentCourse;
       let outputDir: string | undefined;
 
@@ -237,22 +375,23 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
           index += 1;
           continue;
         }
-        if (!courseId) {
+        if (!courseId && !token.startsWith("/")) {
           courseId = token;
         }
       }
 
       if (!courseId) {
-        lines.push(warn("Usage: export [courseId] [--dir path]"));
+        lines.push(warn("Usage: /export [courseId] [--dir path]"));
         return { lines, state };
       }
 
       try {
         const exported = await ctx.exportFactory(courseId, outputDir);
         lines.push(...respond([
-          ok(`Exported ${exported.courseId}`),
+          ok(`📦 Exported ${exported.courseId}`),
           badge("JSON:", exported.jsonPath),
           badge("Markdown:", exported.markdownPath),
+          ...(exported.htmlPath ? [badge("HTML:", exported.htmlPath)] : []),
         ]));
       } catch (e: any) {
         lines.push(fail(`Error: ${e.message}`));
@@ -260,21 +399,56 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
       return { lines, state };
     }
 
+    // Visual artifact generation commands
+    if (cmd === "/notes" || cmd === "/flashcards" || cmd === "/infographic") {
+      if (!state.currentCourse) { lines.push(warn("No course loaded. Process a video first.")); return { lines, state }; }
+      
+      const s = ctx.loadSavedCourse(state.currentCourse);
+      if (!s) { lines.push(fail(`Course "${state.currentCourse}" not found`)); return { lines, state }; }
+
+      const artifactType = cmd.slice(1); // remove leading /
+      const artifactData = s.artifacts?.find((a: any) => a.kind === artifactType);
+      
+      if (!artifactData) {
+        lines.push(...respond([warn(`No ${artifactType} artifact found. Run process with --outputs ${artifactType}`)]));
+        return { lines, state };
+      }
+
+      // Generate HTML artifact
+      const COURSE_DIR = join(homedir(), ".learnframe", "courses");
+      const exportDir = join(COURSE_DIR, "exports", state.currentCourse);
+      mkdirSync(exportDir, { recursive: true });
+      
+      const htmlPath = join(exportDir, `${state.currentCourse}-${artifactType}.html`);
+      const html = generateHtmlArtifact(artifactType, `${state.currentCourse} — ${artifactType}`, artifactData.data);
+      writeFileSync(htmlPath, html);
+
+      lines.push(...respond([
+        ok(`✨ Generated ${artifactType} artifact`),
+        badge("HTML:", htmlPath),
+        info("Open in browser to view visual output"),
+      ]));
+      return { lines, state };
+    }
+
+    // List courses
     if (cmd === "courses") {
       const saved = ctx.listSavedCourses();
       if (saved.length === 0) {
-        lines.push(...respond([info("No saved courses")]));
+        lines.push(info("No saved courses"));
       } else {
         lines.push(...respond(saved.map((c, i) => numbered(i + 1, c))));
       }
       return { lines, state };
     }
 
+    // Show URL
     if (cmd === "url") {
       lines.push(state.currentUrl ? badge("URL:", state.currentUrl) : info("No course loaded"));
       return { lines, state };
     }
 
+    // Load course
     if (cmd === "course") {
       const id = rest[0];
       if (!id) { lines.push(warn("Usage: course <id>")); return { lines, state }; }
@@ -282,10 +456,18 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
       if (!s) { lines.push(fail(`Course "${id}" not found`)); return { lines, state }; }
       state.currentCourse = id;
       state.currentUrl = s.url;
-      lines.push(ok(`Loaded ${id} — ${s.chunkCount || 0} chunks, ${(s.artifacts || []).length} artifacts`));
+      state.mode = "chat";
+      lines.push(...respond([
+        ok(`📚 Loaded "${id}"`),
+        badge("Mode:", "CHAT — ask questions naturally"),
+        badge("Chunks:", String(s.chunkCount || 0)),
+        badge("Artifacts:", String((s.artifacts || []).length)),
+        info("Type /help for available commands"),
+      ]));
       return { lines, state };
     }
 
+    // Resolve URL
     if (cmd === "resolve") {
       const url = rest.join(" ");
       if (!url) { lines.push(warn("Usage: resolve <url>")); return { lines, state }; }
@@ -294,13 +476,14 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
         state.currentCourse = result.courseId;
         state.currentUrl = url;
         lines.push(...respond([
-          ok(`Resolved: ${result.videos.length} video(s)`),
+          ok(`🔗 Resolved: ${result.videos.length} video(s)`),
           ...result.videos.map((v: any) => bullet(`${v.id} — ${v.title || "no title"}`)),
         ]));
       } catch (e: any) { lines.push(fail(`Error: ${e.message}`)); }
       return { lines, state };
     }
 
+    // Transcript command
     if (cmd === "transcript") {
       const rawInput = rest.join(" ");
       const useWhisper = rawInput.includes("--whisper");
@@ -335,6 +518,7 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
       return { lines, state };
     }
 
+    // Process command
     if (cmd === "process") {
       const apiKey = ctx.getApiKey();
       if (!apiKey) { lines.push(fail("OPENAI_API_KEY not set")); return { lines, state }; }
@@ -345,67 +529,97 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
       const url = urlParts.join(" ");
       if (!url) { lines.push(warn("Usage: process <url> [--outputs notes,summary] [--whisper]")); return { lines, state }; }
 
-      lines.push(paint(C.dim, "Extracting transcript..."));
       try {
         const result = await ctx.processFactory(url, apiKey, outputs, useWhisper);
         state.currentCourse = result.courseId;
         state.currentUrl = url;
+        state.mode = "chat";
         lines.push(...respond([
-          ok(`Done! ${result.artifactCount} artifacts generated`),
+          ok(`✨ Done! ${result.artifactCount} artifacts generated`),
           ...result.artifactKinds.map((k: string) => bullet(`${k} (${result.modelRole})`)),
-          info("Saved. Try: ask \"what is this course about?\""),
-          paint(C.brightGreen, `SAVED:${result.courseId}`),
+          "",
+          paint(C.brightGreen, "💡 Chat mode activated!"),
+          info("Just type your questions naturally — no 'ask' needed"),
+          info("Type /help for slash commands"),
         ]));
       } catch (e: any) { lines.push(fail(`Error: ${e.message}`)); }
       return { lines, state };
     }
 
-    if (cmd === "ask") {
-      const apiKey = ctx.getApiKey();
-      if (!apiKey) { lines.push(fail("OPENAI_API_KEY not set")); return { lines, state }; }
-      if (!state.currentCourse) { lines.push(warn("No course loaded. Run 'process <url>' or 'course <id>' first.")); return { lines, state }; }
-      const question = rest.join(" ");
-      if (!question) { lines.push(warn("Usage: ask <question>")); return { lines, state }; }
+    // Quit chat mode
+    if (cmd === "/quit" || cmd === "!quit") {
+      state.mode = "command";
+      state.currentCourse = undefined;
+      state.currentUrl = undefined;
+      lines.push(info("Switched to command mode"));
+      return { lines, state };
+    }
 
+    // CHAT MODE: plain text = ask question
+    if (state.mode === "chat" && !cmd.startsWith("/") && !cmd.startsWith("!")) {
+      const apiKey = ctx.getApiKey();
+      if (!apiKey) { 
+        lines.push(...respond([fail("OPENAI_API_KEY not set")]));
+        return { lines, state }; 
+      }
+      if (!state.currentCourse) { 
+        lines.push(...respond([warn("No course loaded")]));
+        return { lines, state }; 
+      }
+
+      const question = trimmed;
+      
       try {
         if (!llm.instance) llm.instance = await ctx.llmFactory(apiKey);
         const courseState = ctx.loadSavedCourse(state.currentCourse);
-        if (!courseState) { lines.push(fail(`Course "${state.currentCourse}" not found on disk.`)); return { lines, state }; }
+        if (!courseState) { 
+          lines.push(...respond([fail(`Course "${state.currentCourse}" not found on disk.`)]));
+          return { lines, state }; 
+        }
 
         const { createRetrievalQaEngine } = await import("../qa/retrieval.js");
         const engine = createRetrievalQaEngine({ chunks: courseState.chunks, artifacts: courseState.artifacts, llm: llm.instance, maxContextChunks: 4 });
         const answer = await engine.ask({ courseId: state.currentCourse, question });
 
+        state.chatHistory.push({ role: "user", text: question });
+
         if (answer.status === "insufficient_context") {
+          state.chatHistory.push({ role: "assistant", text: answer.answer });
           lines.push(...respond([
             answer.answer,
             `  ${paint(C.dim, `(reason: ${answer.confidence.reason.slice(0, 200)})`)}`,
           ]));
           return { lines, state };
         }
+        
         const ansLines: string[] = [paint(C.brightWhite, answer.answer)];
         if (answer.citations.length > 0) {
           ansLines.push("");
-          ansLines.push(title(`Citations (${answer.citations.length})`));
+          ansLines.push(title(`📍 Citations (${answer.citations.length})`));
           answer.citations.forEach((c: any) => ansLines.push(bullet(`${c.videoId} [${fmt(c.startSeconds)}-${fmt(c.endSeconds)}]`)));
         }
         if (answer.replayRanges.length > 0) {
           ansLines.push("");
-          ansLines.push(title("Replay"));
+          ansLines.push(title("▶️ Replay"));
           answer.replayRanges.forEach((r: any) => ansLines.push(bullet(`${r.videoId} [${fmt(r.startSeconds)}-${fmt(r.endSeconds)}]`)));
         }
         if (answer.followUpQuestions.length > 0) {
           ansLines.push("");
-          ansLines.push(title("Follow-ups"));
+          ansLines.push(title("💭 Follow-ups"));
           answer.followUpQuestions.forEach((q: string) => ansLines.push(bullet(q)));
         }
+        
+        state.chatHistory.push({ role: "assistant", text: answer.answer });
         lines.push(...respond(ansLines));
-      } catch (e: any) { lines.push(fail(`Error: ${e.message}`)); }
+      } catch (e: any) { 
+        lines.push(...respond([fail(`Error: ${e.message}`)]));
+      }
       return { lines, state };
     }
 
-    if (state.currentCourse) {
-      lines.push(warn(`Unknown command "${cmd}". To ask a question use: ask ${trimmed}`));
+    // Unknown command
+    if (state.mode === "chat") {
+      lines.push(...respond([warn(`Unknown command "${cmd}". Available: /notes, /flashcards, /infographic, /export, /status, /artifacts, /quit`)]));
     } else {
       lines.push(warn(`Unknown command: ${cmd}. Type 'help' for commands.`));
     }
@@ -570,7 +784,25 @@ export function defaultTuiContext(): TuiContext {
       writeFileSync(jsonPath, exportPack.json);
       writeFileSync(markdownPath, exportPack.markdown);
 
-      return { courseId, jsonPath, markdownPath };
+      // Generate HTML artifacts if they exist
+      const htmlPath = join(exportDir, `${courseId}.html`);
+      if (savedCourse.artifacts?.length > 0) {
+        const html = generateHtmlArtifact("infographic", courseId, {
+          stats: {
+            "Videos": Array.isArray(savedCourse.videos) ? savedCourse.videos.length : 1,
+            "Artifacts": savedCourse.artifacts.length,
+            "Chunks": savedCourse.chunkCount || 0,
+          },
+          items: savedCourse.artifacts.map((a: any) => ({
+            title: a.kind,
+            description: a.videoId ? `For video: ${a.videoId}` : "Course-level artifact",
+            tags: [a.modelRole || "unknown"],
+          })),
+        });
+        writeFileSync(htmlPath, html);
+      }
+
+      return { courseId, jsonPath, markdownPath, htmlPath: existsSync(htmlPath) ? htmlPath : undefined };
     },
   };
 }

@@ -13,7 +13,16 @@ console.log(colored(C.dim, "  Type 'help' for commands, 'process <url>' to start
 console.log("");
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-rl.setPrompt(colored(C.brightCyan, "You › "));
+
+function getPrompt(): string {
+  const state = session.getState();
+  if (state.mode === "chat" && state.currentCourse) {
+    return colored(C.brightGreen, `${state.currentCourse} › `);
+  }
+  return colored(C.brightCyan, "cmd › ");
+}
+
+rl.setPrompt(getPrompt());
 rl.prompt();
 
 rl.on("line", async (line) => {
@@ -26,6 +35,7 @@ rl.on("line", async (line) => {
   } catch (e: any) {
     console.log(`  ${colored(C.red, `Error: ${e.message}`)}`);
   }
+  rl.setPrompt(getPrompt());
   console.log("");
   rl.prompt();
 });
