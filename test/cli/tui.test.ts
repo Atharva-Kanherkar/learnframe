@@ -1,5 +1,8 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { makeTuiSession, paint, C, userBubble, assistantBubble, generateHtmlArtifact, stripAnsi } from "../../src/cli/tui.js";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { makeTuiSession, paint, C, userBubble, assistantBubble, generateHtmlArtifact, stripAnsi, createFileSystemCourseStore, courseIdFromStorageKey } from "../../src/cli/tui.js";
 import type { TuiContext, TuiSession } from "../../src/cli/tui.js";
 import type { VideoPlayer } from "../../src/cli/video-player.js";
 
@@ -312,5 +315,39 @@ describe("TUI state transitions", () => {
 
     const askOutput = await lines(session, "what is this?");
     expect(contains(askOutput, "ok")).toBe(true);
+  });
+});
+
+describe("File-system course store", () => {
+  it("preserves full course IDs when SDK storage keys contain colons", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "learnframe-course-store-"));
+    try {
+      const courseId = "youtube-course:playlist:jhDUxynEQRI";
+      const store = createFileSystemCourseStore(dir);
+
+      await store.storage.set(`course-state:v1:${courseId}`, { courseId, chunks: [{ id: "c1" }], artifacts: [] });
+
+      expect(courseIdFromStorageKey(`course-state:v1:${courseId}`)).toBe(courseId);
+      expect(store.loadSavedCourse(courseId)?.courseId).toBe(courseId);
+      expect(store.listSavedCourses()).toEqual([courseId]);
+      expect(existsSync(join(dir, `${encodeURIComponent(courseId)}.json`))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads legacy last-segment files created by the old adapter", () => {
+    const dir = mkdtempSync(join(tmpdir(), "learnframe-course-store-"));
+    try {
+      const courseId = "youtube-course:playlist:jhDUxynEQRI";
+      writeFileSync(join(dir, "jhDUxynEQRI.json"), JSON.stringify({ courseId, chunks: [{ id: "legacy" }], artifacts: [] }));
+
+      const store = createFileSystemCourseStore(dir);
+
+      expect(store.loadSavedCourse(courseId)?.chunks[0].id).toBe("legacy");
+      expect(store.listSavedCourses()).toEqual([courseId]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

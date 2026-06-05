@@ -582,63 +582,112 @@ function parseTimestamp(ts: string): number {
   return parts[0] * 3600 + parts[1] * 60 + parts[2];
 }
 
+const COURSE_STATE_KEY_PREFIX = "course-state:v1:";
+
+export function courseIdFromStorageKey(key: string): string {
+  return key.startsWith(COURSE_STATE_KEY_PREFIX) ? key.slice(COURSE_STATE_KEY_PREFIX.length) : key;
+}
+
+function courseFileName(courseId: string): string {
+  return `${encodeURIComponent(courseId)}.json`;
+}
+
+function decodeCourseFileName(fileName: string): string {
+  const stem = fileName.replace(/\.json$/, "");
+  try {
+    return decodeURIComponent(stem);
+  } catch {
+    return stem;
+  }
+}
+
+function courseFileCandidates(courseDir: string, courseId: string): string[] {
+  const legacyLastSegment = courseId.includes(":") ? courseId.split(":").pop() : undefined;
+  const candidates = [
+    join(courseDir, courseFileName(courseId)),
+    join(courseDir, `${courseId}.json`),
+    ...(legacyLastSegment ? [join(courseDir, `${legacyLastSegment}.json`), join(courseDir, courseFileName(legacyLastSegment))] : []),
+  ];
+  return [...new Set(candidates)];
+}
+
+export function createFileSystemCourseStore(courseDir: string) {
+  mkdirSync(courseDir, { recursive: true });
+
+  const canonicalPath = (courseId: string) => join(courseDir, courseFileName(courseId));
+  const existingPath = (courseId: string) => courseFileCandidates(courseDir, courseId).find((p) => existsSync(p));
+
+  function loadSavedCourse(id: string): any | undefined {
+    const p = existingPath(id);
+    return p ? JSON.parse(readFileSync(p, "utf8")) : undefined;
+  }
+
+  function saveCourse(id: string, state: any): void {
+    writeFileSync(canonicalPath(id), JSON.stringify(state, null, 2));
+  }
+
+  function deleteCourse(id: string): void {
+    for (const p of courseFileCandidates(courseDir, id)) {
+      if (existsSync(p)) unlinkSync(p);
+    }
+  }
+
+  const storage: StorageAdapter = {
+    async get<T>(key: string): Promise<T | undefined> {
+      return loadSavedCourse(courseIdFromStorageKey(key)) as T | undefined;
+    },
+    async set<T>(key: string, value: T): Promise<void> {
+      saveCourse(courseIdFromStorageKey(key), value);
+    },
+    async delete(key: string): Promise<void> {
+      deleteCourse(courseIdFromStorageKey(key));
+    },
+    async has(key: string): Promise<boolean> {
+      return Boolean(existingPath(courseIdFromStorageKey(key)));
+    },
+  };
+
+  return {
+    storage,
+    listSavedCourses: () => {
+      try {
+        const ids = readdirSync(courseDir)
+          .filter((f) => f.endsWith(".json"))
+          .map((f) => {
+            try {
+              const parsed = JSON.parse(readFileSync(join(courseDir, f), "utf8"));
+              return typeof parsed.courseId === "string" ? parsed.courseId : decodeCourseFileName(f);
+            } catch {
+              return decodeCourseFileName(f);
+            }
+          });
+        return [...new Set(ids)];
+      } catch {
+        return [];
+      }
+    },
+    loadSavedCourse,
+    saveCourse,
+    deleteCourse,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Default context
 // ---------------------------------------------------------------------------
 export function defaultTuiContext(): TuiContext {
   const COURSE_DIR = join(homedir(), ".learnframe", "courses");
-  mkdirSync(COURSE_DIR, { recursive: true });
-
-  function createFileSystemStorageAdapter(): StorageAdapter {
-    return {
-      async get<T>(key: string): Promise<T | undefined> {
-        const courseId = key.split(":").pop();
-        if (!courseId) return undefined;
-        const p = join(COURSE_DIR, `${courseId}.json`);
-        if (!existsSync(p)) return undefined;
-        return JSON.parse(readFileSync(p, "utf8"));
-      },
-      async set<T>(key: string, value: T): Promise<void> {
-        const courseId = key.split(":").pop();
-        if (!courseId) return;
-        writeFileSync(join(COURSE_DIR, `${courseId}.json`), JSON.stringify(value, null, 2));
-      },
-      async delete(key: string): Promise<void> {
-        const courseId = key.split(":").pop();
-        if (!courseId) return;
-        const p = join(COURSE_DIR, `${courseId}.json`);
-        if (existsSync(p)) unlinkSync(p);
-      },
-      async has(key: string): Promise<boolean> {
-        const courseId = key.split(":").pop();
-        if (!courseId) return false;
-        return existsSync(join(COURSE_DIR, `${courseId}.json`));
-      },
-    };
-  }
+  const courseStore = createFileSystemCourseStore(COURSE_DIR);
 
   return {
     courseDir: COURSE_DIR,
     getApiKey: () => process.env.OPENAI_API_KEY,
     now: () => new Date(),
 
-    listSavedCourses: () => {
-      try { return readdirSync(COURSE_DIR).filter((f) => f.endsWith(".json")).map((f) => f.replace(".json", "")); } catch { return []; }
-    },
-
-    loadSavedCourse: (id: string) => {
-      const p = join(COURSE_DIR, `${id}.json`);
-      return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : undefined;
-    },
-
-    saveCourse: (id: string, state: any) => {
-      writeFileSync(join(COURSE_DIR, `${id}.json`), JSON.stringify(state, null, 2));
-    },
-
-    deleteCourse: (id: string) => {
-      const p = join(COURSE_DIR, `${id}.json`);
-      if (existsSync(p)) unlinkSync(p);
-    },
+    listSavedCourses: courseStore.listSavedCourses,
+    loadSavedCourse: courseStore.loadSavedCourse,
+    saveCourse: courseStore.saveCourse,
+    deleteCourse: courseStore.deleteCourse,
 
     async resolveUrl(url: string) {
       const p = parseYoutubeUrl(url);
@@ -672,7 +721,7 @@ export function defaultTuiContext(): TuiContext {
         import("../adapters/yt-dlp-transcript.js"),
         import("./llm.js"),
       ]);
-      const storage = createFileSystemStorageAdapter();
+      const storage = courseStore.storage;
       const llm = await createOpenAiLlmAdapter(apiKey);
       const transcriptProvider = new YtDlpTranscriptProvider({ storage: createInMemoryStorage(), timeoutMs: 120_000 });
       const sdk = createLearnFrame({
