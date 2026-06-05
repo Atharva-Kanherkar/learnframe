@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {
   createInMemoryStorage,
-  createYoutubeDataApiSourceResolver,
+  createInMemorySourceResolver,
   YtDlpTranscriptProvider,
   WhisperTranscriptProvider,
   chunkTranscript,
@@ -9,17 +9,18 @@ import {
   createRetrievalQaEngine,
   parseYoutubeUrl,
   createLearnFrame,
-  answerSchema,
   type ArtifactKind,
   type LlmAdapter,
   type LlmRequest,
   type RetrievalQaEngine,
-  type TranscriptChunk,
   type Transcript,
 } from "../index.js";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 
 // ---------------------------------------------------------------------------
-// OpenAI LLM adapter (runs on native fetch, no extra deps)
+// OpenAI LLM adapter
 // ---------------------------------------------------------------------------
 
 function createOpenAiLlmAdapter(apiKey: string, model: string = "gpt-4o-mini"): LlmAdapter {
@@ -57,25 +58,34 @@ function createOpenAiLlmAdapter(apiKey: string, model: string = "gpt-4o-mini"): 
   };
 }
 
-// Embedded JSON schemas for structured output (keeps CLI dependency-free)
+// ---------------------------------------------------------------------------
+// JSON schemas (embedded, no dependency drift)
+// ---------------------------------------------------------------------------
+
 function schemasForTask(task: string): Record<string, unknown> | undefined {
-  if (task === "chunk-notes") return CHUNK_NOTES_SCHEMA;
-  if (task === "video-summary") return VIDEO_SUMMARY_SCHEMA;
-  if (task === "playlist-syllabus") return SYLLABUS_SCHEMA;
-  if (task === "glossary") return GLOSSARY_SCHEMA;
-  if (task === "quiz") return QUIZ_SCHEMA;
-  if (task === "flashcards") return FLASHCARDS_SCHEMA;
-  if (task === "study-plan") return STUDY_PLAN_SCHEMA;
-  if (task === "prerequisite-map") return PREREQ_SCHEMA;
-  if (task === "retrieval-qa-answer") return QA_ANSWER_SCHEMA;
-  return undefined;
+  const schema = SCHEMAS[task];
+  return schema as Record<string, unknown> | undefined;
 }
 
-const CITATION = {
+const CIT = {
   type: "object",
   additionalProperties: false,
   required: ["videoId", "startSeconds", "endSeconds", "chunkId"],
   properties: { videoId: { type: "string" }, startSeconds: { type: "number" }, endSeconds: { type: "number" }, chunkId: { type: "string" } },
+};
+
+// QA citation — text is optional, modelled as required nullable so strict mode accepts it
+const QA_CIT = {
+  type: "object",
+  additionalProperties: false,
+  required: ["videoId", "startSeconds", "endSeconds", "chunkId", "text"],
+  properties: {
+    videoId: { type: "string" },
+    startSeconds: { type: "number" },
+    endSeconds: { type: "number" },
+    chunkId: { type: "string" },
+    text: { type: "string" },
+  },
 };
 
 const RANGE = {
@@ -85,67 +95,86 @@ const RANGE = {
   properties: { videoId: { type: "string" }, startSeconds: { type: "number" }, endSeconds: { type: "number" } },
 };
 
-const CHUNK_NOTES_SCHEMA = {
-  type: "object", additionalProperties: false,
-  required: ["chunkId", "videoId", "summary", "keyPoints", "concepts", "citations"],
-  properties: { chunkId: { type: "string" }, videoId: { type: "string" }, summary: { type: "string" }, keyPoints: { type: "array", items: { type: "string" } }, concepts: { type: "array", items: { type: "string" } }, citations: { type: "array", items: CITATION } },
-} as const;
+const SCHEMAS: Record<string, unknown> = {
+  "chunk-notes": {
+    type: "object", additionalProperties: false,
+    required: ["chunkId", "videoId", "summary", "keyPoints", "concepts", "citations"],
+    properties: { chunkId: { type: "string" }, videoId: { type: "string" }, summary: { type: "string" }, keyPoints: { type: "array", items: { type: "string" } }, concepts: { type: "array", items: { type: "string" } }, citations: { type: "array", items: CIT } },
+  },
+  "video-summary": {
+    type: "object", additionalProperties: false,
+    required: ["videoId", "summary", "keyPoints", "citations"],
+    properties: { videoId: { type: "string" }, summary: { type: "string" }, keyPoints: { type: "array", items: { type: "string" } }, citations: { type: "array", items: CIT } },
+  },
+  "playlist-syllabus": {
+    type: "object", additionalProperties: false,
+    required: ["courseId", "title", "modules"],
+    properties: { courseId: { type: "string" }, title: { type: "string" }, modules: { type: "array", items: { type: "object", additionalProperties: false, required: ["title", "summary", "videoIds", "outcomes"], properties: { title: { type: "string" }, summary: { type: "string" }, videoIds: { type: "array", items: { type: "string" } }, outcomes: { type: "array", items: { type: "string" } } } } } },
+  },
+  "glossary": {
+    type: "object", additionalProperties: false,
+    required: ["terms"],
+    properties: { terms: { type: "array", items: { type: "object", additionalProperties: false, required: ["term", "definition", "citations"], properties: { term: { type: "string" }, definition: { type: "string" }, citations: { type: "array", items: CIT } } } } },
+  },
+  "quiz": {
+    type: "object", additionalProperties: false,
+    required: ["questions"],
+    properties: { questions: { type: "array", items: { type: "object", additionalProperties: false, required: ["question", "choices", "answer", "explanation", "citations"], properties: { question: { type: "string" }, choices: { type: "array", items: { type: "string" }, minItems: 2 }, answer: { type: "string" }, explanation: { type: "string" }, citations: { type: "array", items: CIT } } } } },
+  },
+  "flashcards": {
+    type: "object", additionalProperties: false,
+    required: ["cards"],
+    properties: { cards: { type: "array", items: { type: "object", additionalProperties: false, required: ["front", "back", "citations"], properties: { front: { type: "string" }, back: { type: "string" }, citations: { type: "array", items: CIT } } } } },
+  },
+  "study-plan": {
+    type: "object", additionalProperties: false,
+    required: ["courseId", "steps"],
+    properties: { courseId: { type: "string" }, steps: { type: "array", items: { type: "object", additionalProperties: false, required: ["title", "objective", "videoIds"], properties: { title: { type: "string" }, objective: { type: "string" }, videoIds: { type: "array", items: { type: "string" } } } } } },
+  },
+  "prerequisite-map": {
+    type: "object", additionalProperties: false,
+    required: ["prerequisites"],
+    properties: { prerequisites: { type: "array", items: { type: "object", additionalProperties: false, required: ["concept", "requiredBefore", "reason", "citations"], properties: { concept: { type: "string" }, requiredBefore: { type: "array", items: { type: "string" } }, reason: { type: "string" }, citations: { type: "array", items: CIT } } } } },
+  },
+  "retrieval-qa-answer": {
+    type: "object", additionalProperties: false,
+    required: ["answer", "status", "citations", "replayRanges", "followUpQuestions", "confidence"],
+    properties: { answer: { type: "string" }, status: { type: "string", enum: ["answered", "insufficient_context"] }, citations: { type: "array", items: QA_CIT }, replayRanges: { type: "array", items: RANGE }, followUpQuestions: { type: "array", items: { type: "string" } }, confidence: { type: "object", additionalProperties: false, required: ["score", "reason"], properties: { score: { type: "number" }, reason: { type: "string" } } } },
+  },
+};
 
-const VIDEO_SUMMARY_SCHEMA = {
-  type: "object", additionalProperties: false,
-  required: ["videoId", "summary", "keyPoints", "citations"],
-  properties: { videoId: { type: "string" }, summary: { type: "string" }, keyPoints: { type: "array", items: { type: "string" } }, citations: { type: "array", items: CITATION } },
-} as const;
+// ---------------------------------------------------------------------------
+// Course persistence (so `process` → `ask` survives CLI exits)
+// ---------------------------------------------------------------------------
 
-const SYLLABUS_SCHEMA = {
-  type: "object", additionalProperties: false,
-  required: ["courseId", "title", "modules"],
-  properties: { courseId: { type: "string" }, title: { type: "string" }, modules: { type: "array", items: { type: "object", additionalProperties: false, required: ["title", "summary", "videoIds", "outcomes"], properties: { title: { type: "string" }, summary: { type: "string" }, videoIds: { type: "array", items: { type: "string" } }, outcomes: { type: "array", items: { type: "string" } } } } } },
-} as const;
+const COURSE_DIR = join(homedir(), ".learnframe", "courses");
 
-const GLOSSARY_SCHEMA = {
-  type: "object", additionalProperties: false,
-  required: ["terms"],
-  properties: { terms: { type: "array", items: { type: "object", additionalProperties: false, required: ["term", "definition", "citations"], properties: { term: { type: "string" }, definition: { type: "string" }, citations: { type: "array", items: CITATION } } } } },
-} as const;
+function coursePath(courseId: string): string {
+  return join(COURSE_DIR, `${courseId}.json`);
+}
 
-const QUIZ_SCHEMA = {
-  type: "object", additionalProperties: false,
-  required: ["questions"],
-  properties: { questions: { type: "array", items: { type: "object", additionalProperties: false, required: ["question", "choices", "answer", "explanation", "citations"], properties: { question: { type: "string" }, choices: { type: "array", items: { type: "string" }, minItems: 2 }, answer: { type: "string" }, explanation: { type: "string" }, citations: { type: "array", items: CITATION } } } } },
-} as const;
+type CourseState = {
+  courseId: string;
+  url: string;
+  createdAt: string;
+  chunks: any[];
+  artifacts: any[];
+};
 
-const FLASHCARDS_SCHEMA = {
-  type: "object", additionalProperties: false,
-  required: ["cards"],
-  properties: { cards: { type: "array", items: { type: "object", additionalProperties: false, required: ["front", "back", "citations"], properties: { front: { type: "string" }, back: { type: "string" }, citations: { type: "array", items: CITATION } } } } },
-} as const;
+function saveCourseState(state: CourseState): void {
+  mkdirSync(COURSE_DIR, { recursive: true });
+  writeFileSync(coursePath(state.courseId), JSON.stringify(state, null, 2), "utf8");
+}
 
-const STUDY_PLAN_SCHEMA = {
-  type: "object", additionalProperties: false,
-  required: ["courseId", "steps"],
-  properties: { courseId: { type: "string" }, steps: { type: "array", items: { type: "object", additionalProperties: false, required: ["title", "objective", "videoIds"], properties: { title: { type: "string" }, objective: { type: "string" }, videoIds: { type: "array", items: { type: "string" } } } } } },
-} as const;
-
-const PREREQ_SCHEMA = {
-  type: "object", additionalProperties: false,
-  required: ["prerequisites"],
-  properties: { prerequisites: { type: "array", items: { type: "object", additionalProperties: false, required: ["concept", "requiredBefore", "reason", "citations"], properties: { concept: { type: "string" }, requiredBefore: { type: "array", items: { type: "string" } }, reason: { type: "string" }, citations: { type: "array", items: CITATION } } } } },
-} as const;
-
-const QA_ANSWER_SCHEMA = {
-  type: "object", additionalProperties: false,
-  required: ["answer", "status", "citations", "replayRanges", "followUpQuestions", "confidence"],
-  properties: { answer: { type: "string" }, status: { type: "string", enum: ["answered", "insufficient_context"] }, citations: { type: "array", items: { ...CITATION, properties: { ...(CITATION as any).properties, text: { type: "string" } } } }, replayRanges: { type: "array", items: RANGE }, followUpQuestions: { type: "array", items: { type: "string" } }, confidence: { type: "object", additionalProperties: false, required: ["score", "reason"], properties: { score: { type: "number" }, reason: { type: "string" } } } },
-} as const;
+function loadCourseState(courseId: string): CourseState | undefined {
+  const path = coursePath(courseId);
+  if (!existsSync(path)) return undefined;
+  return JSON.parse(readFileSync(path, "utf8")) as CourseState;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function requireApiKey(): string {
-  return process.env.OPENAI_API_KEY || "";
-}
 
 function printJson(data: unknown) {
   console.log(JSON.stringify(data, null, 2));
@@ -172,47 +201,28 @@ function die(message: string): never {
   process.exit(1);
 }
 
-// ---------------------------------------------------------------------------
-// Pipeline helpers
-// ---------------------------------------------------------------------------
-
-function getYtDlpPath(): string {
-  const paths = [
-    "/opt/homebrew/bin/yt-dlp",
-    "/usr/local/bin/yt-dlp",
-    "/usr/bin/yt-dlp",
-    "yt-dlp",
-  ];
-  for (const p of paths) {
-    try {
-      // Don't actually run, just try the known paths
-      // The provider will handle the binary resolution
-    } catch {}
-    // Just use "yt-dlp" as default and let PATH handle it
-  }
-  return "yt-dlp";
+function requireApiKey(): string {
+  return process.env.OPENAI_API_KEY || "";
 }
 
-async function resolveSource(url: string, apiKey: string | undefined) {
-  const storage = createInMemoryStorage();
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+async function cmdResolve(url: string) {
   const parsed = parseYoutubeUrl(url);
-  printJson({ parsed });
+  const resolver = createInMemorySourceResolver({
+    videos: { [parsed.videoId ?? url]: { id: parsed.videoId ?? url, url: parsed.canonicalUrl, title: "YouTube video" } },
+  });
+  const result = await resolver.resolve(
+    { type: "video", url: parsed.canonicalUrl, videoId: parsed.videoId },
+    { storage: createInMemoryStorage(), reportProgress: async () => {} },
+  );
+  printJson(result);
 }
 
-async function extractTranscript(url: string, audioApiKey: string | undefined, opts: { language?: string; useWhisper?: boolean }) {
-  const storage = createInMemoryStorage();
-  const ytDlpTranscript = new YtDlpTranscriptProvider({ storage, timeoutMs: 120_000 });
-
-  // Try captions first
-  const videoMeta = { id: parseYoutubeUrl(url).videoId ?? url, url, availability: "available" as const };
-  let transcript = await ytDlpTranscript.getTranscript(videoMeta, { language: opts.language ?? "en" });
-
-  if (transcript.status === "missing" && opts.useWhisper && audioApiKey) {
-    console.error("No captions found. Falling back to OpenAI Whisper transcription...");
-    const whisper = new WhisperTranscriptProvider({ apiKey: audioApiKey, storage, timeoutMs: 300_000 });
-    transcript = await whisper.getTranscript(videoMeta, { language: opts.language, allowPaidTranscription: true });
-  }
-
+async function cmdTranscript(url: string, apiKey: string | undefined, opts: { language?: string; useWhisper?: boolean }) {
+  const transcript = await getTranscriptForUrl(url, apiKey, createInMemoryStorage(), opts);
   printJson({
     status: transcript.status,
     segmentCount: transcript.segments.length,
@@ -222,11 +232,11 @@ async function extractTranscript(url: string, audioApiKey: string | undefined, o
   });
 }
 
-async function generateArtifacts(url: string, apiKey: string, outputFlags: string) {
-  const kinds = (outputFlags || "notes,summary").split(",").map((s) => s.trim()) as ArtifactKind[];
+async function cmdGenerate(url: string, apiKey: string, outputFlags: string) {
+  const kinds = parseOutputs(outputFlags);
   const llm = createOpenAiLlmAdapter(apiKey);
   const storage = createInMemoryStorage();
-  const transcript = await getTranscriptForUrl(url, apiKey, storage);
+  const transcript = await getTranscriptForUrl(url, apiKey, storage, {});
 
   if (transcript.status !== "available" || transcript.segments.length === 0) {
     die("Transcript is not available. Cannot generate artifacts without captions.");
@@ -236,53 +246,29 @@ async function generateArtifacts(url: string, apiKey: string, outputFlags: strin
   console.error(`Chunked into ${chunks.length} chunks. Generating artifacts...`);
 
   const engine = createLowCostArtifactEngine({ llm, storage, maxConcurrentChunkNotes: 3 });
-  const artifacts = await engine.generate({
-    courseId: parseYoutubeUrl(url).videoId ?? url,
-    chunks,
-    outputs: kinds,
-  });
-
+  const artifacts = await engine.generate({ courseId: parseYoutubeUrl(url).videoId ?? url, chunks, outputs: kinds });
   printJson(artifacts.map((a) => ({ kind: a.kind, promptVersion: a.promptVersion, modelRole: a.modelRole, data: a.data })));
 }
 
-async function askQuestion(courseId: string, question: string, apiKey: string, opts: { videoId?: string; timestamp?: number }) {
+async function cmdAsk(courseId: string, question: string, apiKey: string, opts: { videoId?: string; timestamp?: number }) {
   const llm = createOpenAiLlmAdapter(apiKey);
+  const state = loadCourseState(courseId);
 
-  // Build a QA engine — consumer provides chunks & artifacts
-  // For a real CLI we'd persist chunks, but for now create an engine with empty
-  // chunks that returns insufficient_context with guidance
-  const qa: RetrievalQaEngine = {
-    async ask(input) {
-      // For now: send directly to LLM without retrieval grounding
-      // A real session would store chunks/artifacts from a prior `process` step
-      const result = await llm.generateStructured({
-        task: "retrieval-qa-answer",
-        promptVersion: "retrieval-qa-v1",
-        modelRole: "medium",
-        input: {
-          question: input.question,
-          courseId: input.courseId,
-          videoId: input.videoId,
-          timestampSeconds: input.timestampSeconds,
-          contextChunks: [],
-          courseContext: [],
-          instructions: "Return insufficient_context because no course content has been loaded.",
-        },
-      });
-      return result as any;
-    },
-  };
+  if (!state) {
+    console.error(`No course state found for "${courseId}". Run "learnframe process" first.`);
+    process.exit(1);
+  }
 
-  const sdk = createLearnFrame({ sourceResolver: dummyResolver(), storage: createInMemoryStorage(), qa });
-  const answer = await sdk.ask({ courseId, videoId: opts.videoId, timestampSeconds: opts.timestamp, question });
+  const engine = createRetrievalQaEngine({ chunks: state.chunks as any[], artifacts: state.artifacts as any[], llm, maxContextChunks: 4 });
+  const answer = await engine.ask({ courseId, videoId: opts.videoId, timestampSeconds: opts.timestamp, question });
   printJson(answer);
 }
 
-async function processFull(url: string, apiKey: string, outputFlags: string) {
-  const kinds = (outputFlags || "notes,summary,syllabus").split(",").map((s) => s.trim()) as ArtifactKind[];
+async function cmdProcess(url: string, apiKey: string, outputFlags: string) {
+  const kinds = parseOutputs(outputFlags);
   const llm = createOpenAiLlmAdapter(apiKey);
   const storage = createInMemoryStorage();
-  const transcript = await getTranscriptForUrl(url, apiKey, storage);
+  const transcript = await getTranscriptForUrl(url, apiKey, storage, {});
 
   if (transcript.status !== "available" || transcript.segments.length === 0) {
     die("Transcript is not available. Cannot process without captions.");
@@ -291,35 +277,44 @@ async function processFull(url: string, apiKey: string, outputFlags: string) {
   const chunks = chunkTranscript(transcript);
   console.error(`Resolved ${transcript.segments.length} transcript segments → ${chunks.length} chunks.\nGenerating: ${kinds.join(", ")}...`);
 
+  const courseId = parseYoutubeUrl(url).videoId ?? url;
   const engine = createLowCostArtifactEngine({ llm, storage, maxConcurrentChunkNotes: 3 });
-  const artifacts = await engine.generate({ courseId: parseYoutubeUrl(url).videoId ?? url, chunks, outputs: kinds });
+  const artifacts = await engine.generate({ courseId, chunks, outputs: kinds });
 
-  const answerEngine = createRetrievalQaEngine({ chunks, artifacts, llm, maxContextChunks: 4 });
+  // Persist so `ask` can reload
+  saveCourseState({ courseId, url, createdAt: new Date().toISOString(), chunks, artifacts });
+
   printJson({
+    courseId,
     transcriptStatus: transcript.status,
     segmentCount: transcript.segments.length,
     chunkCount: chunks.length,
     artifacts: artifacts.map((a) => ({ kind: a.kind, promptVersion: a.promptVersion, modelRole: a.modelRole, data: a.data })),
+    savedTo: coursePath(courseId),
     qaReady: true,
   });
 }
 
-async function getTranscriptForUrl(url: string, apiKey: string | undefined, storage: ReturnType<typeof createInMemoryStorage>): Promise<Transcript> {
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+function parseOutputs(outputFlags: string): ArtifactKind[] {
+  return outputFlags.split(",").map((s) => s.trim()) as ArtifactKind[];
+}
+
+async function getTranscriptForUrl(url: string, apiKey: string | undefined, storage: ReturnType<typeof createInMemoryStorage>, opts: { language?: string; useWhisper?: boolean }): Promise<Transcript> {
   const videoMeta = { id: parseYoutubeUrl(url).videoId ?? url, url, availability: "available" as const };
   const ytDlpTranscript = new YtDlpTranscriptProvider({ storage, timeoutMs: 120_000 });
-  let transcript = await ytDlpTranscript.getTranscript(videoMeta, { language: "en" });
+  let transcript = await ytDlpTranscript.getTranscript(videoMeta, { language: opts.language ?? "en" });
 
-  if (transcript.status === "missing" && apiKey) {
+  if (transcript.status === "missing" && (opts.useWhisper || hasFlag(process.argv, "--whisper")) && apiKey) {
     console.error("No captions found. Falling back to OpenAI Whisper...");
     const whisper = new WhisperTranscriptProvider({ apiKey, storage, timeoutMs: 300_000 });
-    transcript = await whisper.getTranscript(videoMeta, { allowPaidTranscription: true });
+    transcript = await whisper.getTranscript(videoMeta, { language: opts.language, allowPaidTranscription: true });
   }
 
   return transcript;
-}
-
-function dummyResolver() {
-  return { resolve: async () => { throw new Error("not used"); } } as any;
 }
 
 // ---------------------------------------------------------------------------
@@ -334,11 +329,11 @@ const usage = `LearnFrame CLI — YouTube-to-learning pipeline
 Usage: learnframe <command> [options]
 
 Commands:
-  resolve   <url>                              Parse and resolve YouTube URL
+  resolve   <url>                              Resolve YouTube URL to video metadata
   transcript <url> [--language en] [--whisper] Extract captions (or transcribe with --whisper)
   generate  <url> --outputs notes,summary,...  Generate learning artifacts
-  ask       <courseId> <question> [--video-id] [--timestamp] Ask a question
-  process   <url> --outputs notes,summary,...  Full pipeline: transcript → chunk → generate
+  ask       <courseId> <question> [--video-id] [--timestamp] Ask a question (requires prior "process")
+  process   <url> --outputs notes,summary,...  Full pipeline: resolve → transcript → chunk → generate → save
 
 Environment:
   OPENAI_API_KEY    Required for generate, ask, process, and --whisper transcript
@@ -346,9 +341,8 @@ Environment:
 Examples:
   learnframe resolve "https://www.youtube.com/watch?v=abc123"
   learnframe transcript "https://www.youtube.com/watch?v=abc123"
-  learnframe generate "https://www.youtube.com/watch?v=abc123" --outputs notes,summary
-  learnframe ask course-1 "What is gradient descent?" --video-id abc123 --timestamp 300
   learnframe process "https://www.youtube.com/watch?v=abc123" --outputs notes,summary,syllabus
+  learnframe ask abc123 "What is gradient descent?" --timestamp 300
 `;
 
 if (!command || command === "--help" || command === "-h") {
@@ -362,13 +356,13 @@ switch (command) {
   case "resolve": {
     const url = args[1];
     if (!url) die("Usage: learnframe resolve <url>");
-    await resolveSource(url, apiKey);
+    await cmdResolve(url);
     break;
   }
   case "transcript": {
     const url = args[1];
     if (!url) die("Usage: learnframe transcript <url> [--language en] [--whisper]");
-    await extractTranscript(url, apiKey, {
+    await cmdTranscript(url, apiKey, {
       language: flag(args, "language"),
       useWhisper: hasFlag(args, "whisper"),
     });
@@ -377,8 +371,8 @@ switch (command) {
   case "generate": {
     const url = args[1];
     if (!url) die("Usage: learnframe generate <url> --outputs notes,summary,...");
-    if (!apiKey) die("OPENAI_API_KEY environment variable is required for artifact generation.");
-    await generateArtifacts(url, apiKey, requireFlag(args, "outputs"));
+    if (!apiKey) die("OPENAI_API_KEY is required.");
+    await cmdGenerate(url, apiKey, requireFlag(args, "outputs"));
     break;
   }
   case "ask": {
@@ -386,7 +380,7 @@ switch (command) {
     const question = args[2];
     if (!courseId || !question) die("Usage: learnframe ask <courseId> <question> [--video-id] [--timestamp]");
     if (!apiKey) die("OPENAI_API_KEY is required.");
-    await askQuestion(courseId, question, apiKey, {
+    await cmdAsk(courseId, question, apiKey, {
       videoId: flag(args, "video-id"),
       timestamp: flag(args, "timestamp") ? Number(flag(args, "timestamp")) : undefined,
     });
@@ -396,7 +390,7 @@ switch (command) {
     const url = args[1];
     if (!url) die("Usage: learnframe process <url> --outputs notes,summary,...");
     if (!apiKey) die("OPENAI_API_KEY is required.");
-    await processFull(url, apiKey, requireFlag(args, "outputs"));
+    await cmdProcess(url, apiKey, requireFlag(args, "outputs"));
     break;
   }
   default:
