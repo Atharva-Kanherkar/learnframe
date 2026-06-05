@@ -6,12 +6,14 @@ const ctx = defaultTuiContext();
 const session = makeTuiSession(ctx);
 
 console.log("");
-console.log(`  ${colored(C.bold, "LearnFrame")} ${colored(C.dim, "— YouTube to learning pipeline")}`);
+console.log(`  ${colored(C.bold + C.brightCyan, "╭──────────────────────────────────────────╮")}`);
+console.log(`  ${colored(C.bold + C.brightCyan, "│")}  ${colored(C.bold, "LearnFrame")} ${colored(C.dim, "— Claude Code for YouTube")}  ${colored(C.bold + C.brightCyan, "│")}`);
+console.log(`  ${colored(C.bold + C.brightCyan, "╰──────────────────────────────────────────╯")}`);
 console.log(colored(C.dim, "  Type 'help' for commands, 'process <url>' to start, 'exit' to quit."));
 console.log("");
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-rl.setPrompt(colored(C.cyan, "› "));
+rl.setPrompt(colored(C.brightCyan, "You › "));
 rl.prompt();
 
 rl.on("line", async (line) => {
@@ -24,6 +26,7 @@ rl.on("line", async (line) => {
   } catch (e: any) {
     console.log(`  ${colored(C.red, `Error: ${e.message}`)}`);
   }
+  console.log("");
   rl.prompt();
 });
 
