@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { parseYoutubeUrl, createInMemorySourceResolver, createInMemoryStorage, createLearnFrame } from "../index.js";
 import { buildExportPackResult } from "../export/pack.js";
 import type { CourseProcessingState, Transcript, StorageAdapter, ArtifactKind } from "../contracts.js";
+import { createVideoPlayer, detectBackends, pickBackend, type VideoBackend, type VideoPlayer, type KittyFrameDisplay } from "./video-player.js";
 
 const execAsync = promisify(exec);
 
@@ -199,6 +200,7 @@ export type TuiContext = {
   getApiKey: () => string | undefined;
   now: () => Date;
   openUrl?: (url: string) => Promise<void>;
+  videoPlayer?: VideoPlayer;
 };
 
 export type TuiState = {
@@ -221,6 +223,7 @@ export function makeTuiSession(ctx: TuiContext, initial: Partial<TuiState> = {})
     ...initial,
   };
   const llm: { instance: any | undefined } = { instance: undefined };
+  const videoPlayer = ctx.videoPlayer ?? createVideoPlayer();
 
   async function handle(input: string): Promise<TuiOutput> {
     const lines: string[] = [];
@@ -245,7 +248,9 @@ export function makeTuiSession(ctx: TuiContext, initial: Partial<TuiState> = {})
           paint(C.bold, "Chat Commands:"),
           "  Just type — ask anything about the video",
           "  /notes, /flashcards, /infographic — generate artifacts",
-          "  /play [timestamp] — open video in browser/mpv",
+          "  /play [timestamp] — open video in browser",
+          "  /video [timestamp] [--backend=kitty|tct|browser] — play in terminal",
+          "  /stop — stop terminal playback",
           "  /export — export course",
           "  /status — show course info",
           "  /quit — leave chat",
@@ -438,7 +443,7 @@ export function makeTuiSession(ctx: TuiContext, initial: Partial<TuiState> = {})
       const start = rest[0] ? parseTimestamp(rest[0]) : 0;
       if (!videoId) { lines.push(...assistantBubble(["No video"]));
         return { lines, state }; }
-      
+
       const url = `https://youtube.com/watch?v=${videoId}&t=${start}s`;
       if (ctx.openUrl) {
         await ctx.openUrl(url);
@@ -450,6 +455,37 @@ export function makeTuiSession(ctx: TuiContext, initial: Partial<TuiState> = {})
         } catch { /* noop */ }
       }
       lines.push(...assistantBubble([paint(C.green, "▶️  Opened video"), `${url}`]));
+      return { lines, state };
+    }
+
+    // VIDEO (terminal playback)
+    if (cmd === "/video") {
+      if (!state.currentCourse) { lines.push(...assistantBubble(["No course"])); return { lines, state }; }
+      const s = ctx.loadSavedCourse(state.currentCourse);
+      const videoId = s?.videos?.[0]?.id || (state.currentUrl ? parseYoutubeUrl(state.currentUrl).videoId : undefined);
+      const backendFlag = rest.find((r) => r.startsWith("--backend="));
+      const preferredBackend = backendFlag ? (backendFlag.split("=")[1] as VideoBackend) : undefined;
+      const tsArg = rest.find((r) => !r.startsWith("--"));
+      const start = tsArg ? parseTimestamp(tsArg) : 0;
+      if (!videoId) { lines.push(...assistantBubble(["No video"])); return { lines, state }; }
+
+      try {
+        const result = await videoPlayer.play(videoId, start, preferredBackend);
+        lines.push(...assistantBubble([paint(C.green, `▶️  ${result.message}`), `Backend: ${result.backend}`]));
+      } catch (e: any) {
+        lines.push(...assistantBubble([paint(C.red, `Playback failed: ${e.message}`)]));
+      }
+      return { lines, state };
+    }
+
+    // STOP
+    if (cmd === "/stop") {
+      if (!videoPlayer.isPlaying()) {
+        lines.push(...assistantBubble(["Nothing playing"]));
+        return { lines, state };
+      }
+      await videoPlayer.stop();
+      lines.push(...assistantBubble([paint(C.green, "⏹  Stopped")]));
       return { lines, state };
     }
 
@@ -528,7 +564,7 @@ export function makeTuiSession(ctx: TuiContext, initial: Partial<TuiState> = {})
 
     // Unknown
     if (state.mode === "chat") {
-      lines.push(...assistantBubble([paint(C.yellow, `Unknown: ${cmd}`), "Available: /notes /flashcards /infographic /play /export /status /quit"]));
+      lines.push(...assistantBubble([paint(C.yellow, `Unknown: ${cmd}`), "Available: /notes /flashcards /infographic /play /video /stop /export /status /quit"]));
     } else {
       lines.push(...assistantBubble([paint(C.yellow, `Unknown: ${cmd}`), "Type 'help' for commands."]));
     }

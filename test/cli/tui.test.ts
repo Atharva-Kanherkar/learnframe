@@ -1,6 +1,7 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { makeTuiSession, paint, C, userBubble, assistantBubble, generateHtmlArtifact, stripAnsi } from "../../src/cli/tui.js";
 import type { TuiContext, TuiSession } from "../../src/cli/tui.js";
+import type { VideoPlayer } from "../../src/cli/video-player.js";
 
 function fakeCtx(overrides: Partial<TuiContext> = {}): TuiContext {
   const saved: Record<string, any> = {};
@@ -17,7 +18,26 @@ function fakeCtx(overrides: Partial<TuiContext> = {}): TuiContext {
     transcriptFactory: async () => ({ status: "available", segments: [{ id: "s1", videoId: "v1", startSeconds: 0, endSeconds: 2, text: "Hello world" }], provenance: { provider: "yt-dlp", language: "en", captionKind: "auto" } }),
     processFactory: async (url, apiKey, outputs, useWhisper) => ({ courseId: "proc-1", url, artifactCount: 3, artifactKinds: ["notes", "summary", "syllabus"], modelRole: "cheap" }),
     exportFactory: async (courseId, outputDir) => ({ courseId, jsonPath: `/tmp/${courseId}.json`, markdownPath: `/tmp/${courseId}.md` }),
+    videoPlayer: createFakeVideoPlayer(),
     ...overrides,
+  };
+}
+
+function createFakeVideoPlayer(): VideoPlayer {
+  let playing = false;
+  let backend: import("../../src/cli/video-player.js").VideoBackend | undefined;
+  return {
+    async play(_videoId: string, _startSeconds: number, preferredBackend?: import("../../src/cli/video-player.js").VideoBackend) {
+      playing = true;
+      backend = preferredBackend ?? "browser";
+      return { backend, message: `Playing with ${backend}` };
+    },
+    async stop() {
+      playing = false;
+      backend = undefined;
+    },
+    isPlaying: () => playing,
+    getBackend: () => backend,
   };
 }
 
@@ -117,6 +137,71 @@ describe("TUI slash commands", () => {
     const session = makeTuiSession(ctx, { currentCourse: "abc123", mode: "chat" });
     const output = await lines(session, "/play");
     expect(contains(output, "youtube.com")).toBe(true);
+  });
+
+  it("/video errors when no course", async () => {
+    const session = makeTuiSession(fakeCtx());
+    const output = await lines(session, "/video");
+    expect(contains(output, "No course")).toBe(true);
+  });
+
+  it("/video errors when no video", async () => {
+    const ctx = fakeCtx();
+    ctx.saveCourse("abc123", { url: "https://example.com" });
+    const session = makeTuiSession(ctx, { currentCourse: "abc123", mode: "chat" });
+    const output = await lines(session, "/video");
+    expect(contains(output, "No video")).toBe(true);
+  });
+
+  it("/video plays with auto-detected backend", async () => {
+    const ctx = fakeCtx();
+    ctx.saveCourse("abc123", { url: "https://youtube.com/watch?v=xyz123", videos: [{ id: "xyz123" }] });
+    const session = makeTuiSession(ctx, { currentCourse: "abc123", mode: "chat" });
+    const output = await lines(session, "/video");
+    expect(contains(output, "Playing with browser")).toBe(true);
+    expect(contains(output, "browser")).toBe(true);
+  });
+
+  it("/video respects --backend flag", async () => {
+    const ctx = fakeCtx();
+    ctx.saveCourse("abc123", { url: "https://youtube.com/watch?v=xyz123", videos: [{ id: "xyz123" }] });
+    const session = makeTuiSession(ctx, { currentCourse: "abc123", mode: "chat" });
+    const output = await lines(session, "/video --backend=tct");
+    expect(contains(output, "Playing with tct")).toBe(true);
+    expect(contains(output, "tct")).toBe(true);
+  });
+
+  it("/video parses timestamp argument", async () => {
+    const ctx = fakeCtx();
+    ctx.saveCourse("abc123", { url: "https://youtube.com/watch?v=xyz123", videos: [{ id: "xyz123" }] });
+    const session = makeTuiSession(ctx, { currentCourse: "abc123", mode: "chat" });
+    const output = await lines(session, "/video 2:30");
+    expect(contains(output, "Playing with browser")).toBe(true);
+  });
+
+  it("/video combines timestamp and backend flag", async () => {
+    const ctx = fakeCtx();
+    ctx.saveCourse("abc123", { url: "https://youtube.com/watch?v=xyz123", videos: [{ id: "xyz123" }] });
+    const session = makeTuiSession(ctx, { currentCourse: "abc123", mode: "chat" });
+    const output = await lines(session, "/video 1:05 --backend=kitty");
+    expect(contains(output, "Playing with kitty")).toBe(true);
+  });
+
+  it("/stop reports nothing playing when idle", async () => {
+    const ctx = fakeCtx();
+    ctx.saveCourse("abc123", { url: "https://example.com" });
+    const session = makeTuiSession(ctx, { currentCourse: "abc123", mode: "chat" });
+    const output = await lines(session, "/stop");
+    expect(contains(output, "Nothing playing")).toBe(true);
+  });
+
+  it("/stop stops active playback", async () => {
+    const ctx = fakeCtx();
+    ctx.saveCourse("abc123", { url: "https://youtube.com/watch?v=xyz123", videos: [{ id: "xyz123" }] });
+    const session = makeTuiSession(ctx, { currentCourse: "abc123", mode: "chat" });
+    await lines(session, "/video");
+    const output = await lines(session, "/stop");
+    expect(contains(output, "Stopped")).toBe(true);
   });
 });
 
