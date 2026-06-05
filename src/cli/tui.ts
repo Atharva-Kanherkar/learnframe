@@ -254,7 +254,7 @@ export function defaultTuiContext(): TuiContext {
       }
       const chunks = chunkTranscript(transcript);
       const kinds = outputs.split(",").map((s) => s.trim()) as any[];
-      const llm = this.llmFactory(apiKey);
+      const llm = await this.llmFactory(apiKey);
       const engine = createLowCostArtifactEngine({ llm, storage, maxConcurrentChunkNotes: 3 });
       const artifacts = await engine.generate({ courseId: parseYoutubeUrl(url).videoId ?? url, chunks, outputs: kinds });
       const courseId = parseYoutubeUrl(url).videoId ?? url;
