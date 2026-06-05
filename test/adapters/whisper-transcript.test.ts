@@ -17,6 +17,8 @@ describe("WhisperTranscriptProvider", () => {
     expect(args).toContain("--extract-audio");
     expect(args).toContain("--audio-format");
     expect(args).toContain("mp3");
+    expect(args).toContain("--audio-quality");
+    expect(args).toContain("9");
     expect(args).toContain("--ignore-config");
     expect(args).toContain("--no-playlist");
     expect(args).not.toContain("--write-sub");
