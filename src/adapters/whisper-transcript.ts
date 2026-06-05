@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -94,9 +94,12 @@ export class WhisperTranscriptProvider implements TranscriptProvider {
     try {
       tempDir = await mkdtemp(join(tmpdir(), "learnframe-whisper-"));
       await this.runner.run(buildExtractAudioArgs(video.url, tempDir), { cwd: tempDir, timeoutMs: this.timeoutMs });
-      const audioFile = join(tempDir, `${video.id}.mp3`);
-      const audioData = await readFile(audioFile);
-      audioPath = audioFile;
+      const files = await readdir(tempDir);
+      const audioFile = files.find((file) => file.endsWith(".mp3") || file.endsWith(".m4a") || file.endsWith(".wav") || file.endsWith(".webm"));
+      if (!audioFile) {
+        throw new LearnFrameError("RESOLUTION_FAILED", "yt-dlp did not produce an audio file");
+      }
+      audioPath = join(tempDir, audioFile);
     } catch (error) {
       await rm(tempDir!, { force: true, recursive: true }).catch(() => {});
       if (isBlockedYtDlpError(error)) {
