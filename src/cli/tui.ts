@@ -157,6 +157,7 @@ export function makeTuiSession(ctx: TuiContext, initial: TuiState = { currentCou
 
         if (answer.status === "insufficient_context") {
           lines.push(answer.answer);
+          lines.push(`(reason: ${answer.confidence.reason.slice(0, 200)})`);
           return { lines, state };
         }
         lines.push(answer.answer);

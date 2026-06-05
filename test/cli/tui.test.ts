@@ -218,7 +218,7 @@ describe("TUI ask", () => {
     });
     const session = makeTuiSession(ctx, { currentCourse: "abc123", currentUrl: "https://..." });
     const output = await lines(session, "ask what is this?");
-    expect(output).toEqual(["I don't know"]);
+    expect(output).toEqual(["I don't know", "(reason: no context)"]);
   });
 
   it("returns grounded answer with citations and follow-ups", async () => {
