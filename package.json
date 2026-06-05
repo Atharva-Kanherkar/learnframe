@@ -13,6 +13,9 @@
     }
   },
   "license": "MIT",
+  "bin": {
+    "learnframe": "./dist/cli/index.js"
+  },
   "engines": {
     "node": ">=20"
   },

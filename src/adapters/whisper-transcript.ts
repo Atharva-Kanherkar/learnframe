@@ -166,6 +166,8 @@ export function buildExtractAudioArgs(url: string, outputDir: string): string[] 
     "--extract-audio",
     "--audio-format",
     "mp3",
+    "--audio-quality",
+    "9",
     "--no-playlist",
     "--no-warnings",
     "--output",
